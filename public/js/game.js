@@ -38,18 +38,16 @@ const elements = {
 };
 
 // Create the API loading indicator
+// Loading mask for the next round: a translucent scrim plus a spinner. It
+// deliberately has no "loading" copy and no progress bar, so the previous
+// scene stays readable underneath while the model composes the next one.
 const apiLoadingContainer = document.createElement('div');
 apiLoadingContainer.className = 'api-loading-container';
-const apiLoadingText = document.createElement('div');
-apiLoadingText.className = 'api-loading-text';
-apiLoadingText.textContent = '剧情加载中...';
-const apiLoadingBar = document.createElement('div');
-apiLoadingBar.className = 'loading-bar';
-const apiLoadingProgress = document.createElement('div');
-apiLoadingProgress.className = 'loading-progress';
-apiLoadingBar.appendChild(apiLoadingProgress);
-apiLoadingContainer.appendChild(apiLoadingText);
-apiLoadingContainer.appendChild(apiLoadingBar);
+const apiLoadingSpinner = document.createElement('div');
+apiLoadingSpinner.className = 'api-loading-spinner';
+apiLoadingSpinner.setAttribute('role', 'status');
+apiLoadingSpinner.setAttribute('aria-label', '正在生成下一轮');
+apiLoadingContainer.appendChild(apiLoadingSpinner);
 elements.gameContainer.appendChild(apiLoadingContainer);
 
 // Initialize the game
@@ -394,24 +392,12 @@ function setupPulseButton(btn) {
         // Remove the button right away (no fade-out)
         elements.optionsContainer.removeChild(btn);
 
-        // Show the loading indicator
+        // Keep the prologue visible under the mask until the first scene
+        // arrives; processMessageData hides it right before typing starts.
         apiLoadingContainer.style.display = 'flex';
-        // Fake progress until the first bytes arrive
-        let progress = 0;
-        const interval = setInterval(() => {
-            progress += 5;
-            if (progress >= 90) {
-                clearInterval(interval);
-            }
-            apiLoadingProgress.style.width = `${progress}%`;
-        }, 100);
 
         // Switch to the in-game background
         elements.background.src = gameState.resources.game.bgImage;
-        elements.openingText.style.display = 'none'; // Hide the opening line
-
-        // Reset the typewriter
-        Typewriter.reset();
 
         APIService.sendChoice('是')
             .then(response => {
@@ -425,8 +411,6 @@ function setupPulseButton(btn) {
                 btn.disabled = false;
                 btn.classList.remove('btn-disabled');
                 apiLoadingContainer.style.display = 'none';
-                apiLoadingProgress.style.width = '0%';
-                clearInterval(interval);
             });
     });
 
@@ -611,6 +595,9 @@ const APIService = {
                         if (jsonData && typeof jsonData.text === 'string') {
                             // Start the typewriter on the first payload.
                             if (isFirstMessage) {
+                                // The prologue stayed visible under the mask;
+                                // replace it with the first scene now.
+                                elements.openingText.style.display = 'none';
                                 Typewriter.reset();
                                 Typewriter.startTyping();
                                 isFirstMessage = false;
@@ -757,15 +744,11 @@ function handleFinalResponse(displayText) {
                     btn.disabled = true;
                     btn.classList.add('btn-disabled');
 
-                    // Show the loading state
+                    // Keep the previous scene on screen under the mask. The
+                    // typewriter is reset only when the new payload arrives
+                    // (processMessageData), so the player can still re-read it
+                    // while waiting.
                     apiLoadingContainer.style.display = 'flex';
-                    let progress = 0;
-                    const interval = setInterval(() => {
-                        progress = Math.min(progress + 5, 90);
-                        apiLoadingProgress.style.width = `${progress}%`;
-                    }, 100);
-
-                    Typewriter.reset();
 
                     APIService.sendChoice(option.charAt(0))
                         .then(() => {
@@ -777,9 +760,7 @@ function handleFinalResponse(displayText) {
                             showRetry(error);
                         })
                         .finally(() => {
-                            clearInterval(interval);
                             apiLoadingContainer.style.display = 'none';
-                            apiLoadingProgress.style.width = '0%';
                             btn.disabled = false;
                             btn.classList.remove('btn-disabled');
                         });
