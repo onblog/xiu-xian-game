@@ -74,13 +74,20 @@ function playOpeningVideo(callback) {
     let finished = false;
     let watchdog = null;
 
-    // Create the video element
+    // Create the video element.
+    //
+    // Append it to <body>, not #game-container: that element has transform,
+    // will-change and contain: strict, and on iOS Safari a position: fixed
+    // descendant of a transformed container can composite as a black frame
+    // while playback itself continues. The container rect keeps the video
+    // aligned with the game area instead of covering the whole desktop window.
+    const rect = elements.gameContainer.getBoundingClientRect();
     const video = document.createElement('video');
     video.style.position = 'fixed';
-    video.style.top = '0';
-    video.style.left = '0';
-    video.style.width = '100%';
-    video.style.height = '100%';
+    video.style.top = `${rect.top}px`;
+    video.style.left = `${rect.left}px`;
+    video.style.width = `${rect.width}px`;
+    video.style.height = `${rect.height}px`;
     video.style.objectFit = 'cover';
     video.style.zIndex = '9999';
     video.style.backgroundColor = '#000'; // black so the swap is invisible
@@ -88,16 +95,22 @@ function playOpeningVideo(callback) {
     video.setAttribute('playsinline', '');
     video.setAttribute('webkit-playsinline', '');
     video.disablePictureInPicture = true;
+    // Show the title art while the first frame is being fetched, so a slow
+    // mobile connection never presents a pure black screen.
+    video.poster = 'assets/images/opening-bg.webp';
 
-    // The only source we ship: H.264 + AAC in an MP4 container.
+    // The only source we ship. Do not over-specify the codec: the file is
+    // H.264 High 4.1, and the old "avc1.42E01E" (Baseline 3.0) claim made
+    // Safari pick the wrong decoder. "video/mp4" lets the browser probe it.
     const source = document.createElement('source');
-    source.src = 'assets/video/open-video.mp4';
-    source.type = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"';
+    // Bump ?v when the file changes: /assets is cached for a day.
+    source.src = 'assets/video/open-video.mp4?v=2';
+    source.type = 'video/mp4';
     video.appendChild(source);
 
     video.preload = 'auto';
 
-    elements.gameContainer.appendChild(video);
+    document.body.appendChild(video);
     console.log('Video element attached to the DOM');
 
     const finish = () => {
