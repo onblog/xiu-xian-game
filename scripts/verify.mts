@@ -151,6 +151,9 @@ section('Frontend: stateless backend, browser-owned history, no fingerprint');
   check('BGM is lazy-loaded on demand', gameJs.includes('if (!elements.bgm.src)'), true);
   check('BGM is not in the preload list', gameJs.includes("url: 'assets/audio/bgm.mp3'"), false);
   check('loading progress cannot exceed 100%', gameJs.includes('loadedCount = currentLoaded'), true);
+  check('typewriter budget is under 2s', gameJs.includes('TYPEWRITER_BUDGET_MS = 1800'), true);
+  check('opening typewriter scales chars per tick', gameJs.includes('charsPerTick'), true);
+  check('story typewriter spreads the remaining budget', gameJs.includes('remainingTicks'), true);
   check('static assets are cached for a day', readTextIfExists('public/_headers').includes('max-age=86400'), true);
   check('shows the Worker reason on failure', gameJs.includes('showRetry(error)'), true);
 

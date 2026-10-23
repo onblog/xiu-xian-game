@@ -342,11 +342,16 @@ function showOpeningScene() {
     elements.openingText.style.display = 'block';
     const fullText = '苍莽神州，大道三千，唯有修仙者可破凡胎桎梏，逆天改命。当你睁眼，已不再是局外看客 —— 而是厉飞雨！是否立马夺舍厉飞雨，和韩立一起开启新的旅程？';
     let charIndex = 0;
+    const charsPerTick = Math.max(
+        1,
+        Math.ceil(fullText.length / (TYPEWRITER_BUDGET_MS / TYPEWRITER_TICK_MS))
+    );
 
     const typingInterval = setInterval(() => {
         if (charIndex < fullText.length) {
-            elements.openingText.textContent += fullText.charAt(charIndex);
-            charIndex++;
+            const nextChunk = fullText.slice(charIndex, charIndex + charsPerTick);
+            elements.openingText.textContent += nextChunk;
+            charIndex += nextChunk.length;
             elements.openingText.scrollTop = elements.openingText.scrollHeight;
         } else {
             clearInterval(typingInterval);
@@ -362,7 +367,7 @@ function showOpeningScene() {
             elements.optionsContainer.appendChild(btn);
             elements.optionsContainer.style.display = 'flex';
         }
-    }, 50); // ms per char; the original slowed this to 100ms
+    }, TYPEWRITER_TICK_MS);
 }
 
 function setupPulseButton(btn) {
@@ -459,6 +464,12 @@ function showRetry(error) {
 // Replay window size in messages (15 exchanges). Mirrors
 // GAME_HISTORY_MAX_EXCHANGES in server/limits.ts — the server trims again.
 const MAX_HISTORY_MESSAGES = 30;
+
+// Both typewriters reveal their whole text within this budget. The character
+// count per tick is derived from the remaining time, so a 300-character model
+// reply no longer turns into a ten-second wait.
+const TYPEWRITER_BUDGET_MS = 1800;
+const TYPEWRITER_TICK_MS = 14;
 
 // Append one completed exchange to the in-memory replay window.
 //
@@ -612,6 +623,7 @@ const APIService = {
                         if (jsonData && jsonData.done) {
                             Typewriter.hasEndTurn = true;
                             Typewriter.finalResponse = fullResponse;
+                            Typewriter.finishIfIdle();
                         }
                     }
 
@@ -633,7 +645,9 @@ const APIService = {
 const Typewriter = {
     textQueue: '',
     isTyping: false,
-    typingSpeed: 30, // ms per char (≈33 chars/s; the original used 60ms)
+    tickMs: TYPEWRITER_TICK_MS,
+    budgetMs: TYPEWRITER_BUDGET_MS,
+    startedAt: 0,
     currentInterval: null,
     fullDisplayedText: '',
 
@@ -653,15 +667,23 @@ const Typewriter = {
         this.isTyping = true;
         this.hasEndTurn = false;
         this.finalResponse = '';
+        this.startedAt = performance.now();
         elements.storyText.style.display = 'block';
 
         this.currentInterval = setInterval(() => {
             if (this.textQueue.length > 0) {
-                // Reveal the next character
-                const nextChar = this.textQueue.charAt(0);
-                this.fullDisplayedText += nextChar;
+                // Spread whatever is left over the remaining budget: at the
+                // start this is ~N chars per tick, and it accelerates if the
+                // queue grew after typing began.
+                const elapsed = performance.now() - this.startedAt;
+                const remainingMs = Math.max(this.tickMs, this.budgetMs - elapsed);
+                const remainingTicks = Math.max(1, Math.ceil(remainingMs / this.tickMs));
+                const take = Math.max(1, Math.ceil(this.textQueue.length / remainingTicks));
+
+                const chunk = this.textQueue.slice(0, take);
+                this.fullDisplayedText += chunk;
+                this.textQueue = this.textQueue.slice(take);
                 elements.storyText.innerHTML = this.fullDisplayedText; // innerHTML so <br> renders
-                this.textQueue = this.textQueue.substring(1);
                 elements.storyText.scrollTop = elements.storyText.scrollHeight;
 
                 // Hide the loader once there is content
@@ -670,13 +692,18 @@ const Typewriter = {
                 }
             } else {
                 this.stopTyping();
-                // Once typing and the end marker are done, render the choices
-                if (this.hasEndTurn && !this.hasHandledFinalResponse) {
-                    this.hasHandledFinalResponse = true;
-                    handleFinalResponse(this.finalResponse || this.fullDisplayedText);
-                }
+                this.finishIfIdle();
             }
-        }, this.typingSpeed);
+        }, this.tickMs);
+    },
+
+    // Render the choices when the end marker arrives after typing stopped.
+    finishIfIdle() {
+        if (this.isTyping || this.textQueue.length > 0) return;
+        if (this.hasEndTurn && !this.hasHandledFinalResponse) {
+            this.hasHandledFinalResponse = true;
+            handleFinalResponse(this.finalResponse || this.fullDisplayedText);
+        }
     },
 
     // Stop typing
@@ -695,6 +722,7 @@ const Typewriter = {
         this.fullDisplayedText = '';
         this.hasEndTurn = false;
         this.finalResponse = '';
+        this.startedAt = 0;
         this.hasHandledFinalResponse = false;
         elements.storyText.textContent = '';
         elements.storyText.style.display = 'none';
