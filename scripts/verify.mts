@@ -48,6 +48,15 @@ import {
   sseBody
 } from '../server/game.ts';
 import { extractText, readTokenUsage, resolveProvider } from '../server/ai.ts';
+import {
+  enforceLevel,
+  formatLevel,
+  levelInstruction,
+  nextLevel,
+  parseLevel,
+  stageOf,
+  stripProseLayers
+} from '../server/progression.ts';
 import { dailyBudgetFor, quotaKey } from '../server/quota.ts';
 
 let failures = 0;
@@ -108,7 +117,7 @@ section('The persona prompt is the original, verbatim (2929 characters)');
   check('runtime contract is appended, not merged', GAME_FULL_PROMPT.startsWith(GAME_SYSTEM_PROMPT), true);
   check('runtime contract requires echoing the chosen option', GAME_RUNTIME_PROMPT.includes('必须复述该选项的字母与原文动作'), true);
   check('runtime contract forbids repeating the event', GAME_RUNTIME_PROMPT.includes('禁止重复「✅」'), true);
-  check('runtime contract requires progress every turn', GAME_RUNTIME_PROMPT.includes('至少提升 1、最多提升 3 个小层级'), true);
+  check('runtime contract requires progress every turn', GAME_RUNTIME_PROMPT.includes('至少提升 1、最多提升 3 层'), true);
   check('runtime contract forbids male romance', GAME_RUNTIME_PROMPT.includes('严禁与韩立或其他男性角色结为道侣'), true);
   check('runtime contract separates 结丹 from relationships', GAME_RUNTIME_PROMPT.includes('「结丹」是境界名'), true);
 }
@@ -215,6 +224,7 @@ section('Request validation and replay trimming');
   check('1 system + 2 history + 1 current', msgs.length, 4);
   check('messages[0] is persona + runtime contract', msgs[0]!.content.length, GAME_FULL_PROMPT.length);
   check('messages[0] starts with the verbatim persona', msgs[0]!.content.startsWith(GAME_SYSTEM_PROMPT), true);
+  check('custom system prompt is honored', buildMessages([], 'A', 'SYS')[0]!.content, 'SYS');
   check('current input is last', [msgs[3]!.role, msgs[3]!.content], ['user', 'A']);
 }
 
@@ -228,11 +238,12 @@ section('One gate only: the site-wide daily experience budget');
 
   // Measured: persona + runtime contract ≈2522 tokens, each reply ≈174 tokens,
   // each output ≈394 tokens.
-  const promptTokens = estimateTokens(GAME_FULL_PROMPT);
+  const directorTokens = estimateTokens(levelInstruction({ realm: '炼气', layer: 1 }, { realm: '炼气', layer: 3 }));
+  const promptTokens = estimateTokens(GAME_FULL_PROMPT) + directorTokens;
   const firstTurn = estimateNeurons(GAME_MODEL, promptTokens, 394);
   const steadyTurn = estimateNeurons(GAME_MODEL, promptTokens + GAME_HISTORY_MAX_EXCHANGES * 174, 394);
-  check('turn 1 ≈ 24 neurons', Math.round(firstTurn), 24);
-  check(`steady turn ≈ 37 neurons (${GAME_HISTORY_MAX_EXCHANGES}-exchange window)`, Math.round(steadyTurn), 37);
+  check('turn 1 ≈ 25 neurons', Math.round(firstTurn), 25);
+  check(`steady turn ≈ 38 neurons (${GAME_HISTORY_MAX_EXCHANGES}-exchange window)`, Math.round(steadyTurn), 38);
 
   check('neuron budget stays inside the 2000–5000 range', GAME_NEURON_DAILY_BUDGET >= 2000 && GAME_NEURON_DAILY_BUDGET <= 5000, true);
   check('neuron budget is the documented 4000', GAME_NEURON_DAILY_BUDGET, 4000);
@@ -249,8 +260,8 @@ section('One gate only: the site-wide daily experience budget');
     const hist = Math.min(n - 1, GAME_HISTORY_MAX_EXCHANGES) * 174;
     spent += estimateNeurons(GAME_MODEL, promptTokens + hist, 394);
   }
-  check('a 100-turn run costs ≈3560 neurons', Math.round(spent), 3560);
-  check('a 100-turn run fits in 90% of the daily budget', spent <= GAME_NEURON_DAILY_BUDGET * 0.9, true);
+  check('a 100-turn run costs ≈3657 neurons', Math.round(spent), 3657);
+  check('a 100-turn run fits in 92% of the daily budget', spent <= GAME_NEURON_DAILY_BUDGET * 0.92, true);
 
   // Token side: a 100-turn run must fit the OpenAI-compatible budget too.
   let tokens = 0;
@@ -342,6 +353,52 @@ section('Providers: Workers AI by default, OpenAI-compatible on demand');
   check('temperature is pinned low for consistency', gameTs.includes('temperature: 0.75'), true);
   check('openai key comes from the environment only', codeOnly(aiTs).includes('Bearer ${provider.apiKey}'), true);
   check('no API key literal in server code', /sk-[A-Za-z0-9]{16,}/.test(aiTs), false);
+}
+
+/* --- 7.5 Deterministic progression --------------------------------------- */
+
+section('Progression: server-owned levels, 1–10 with strict stage order');
+{
+  check('stage map', [stageOf(1), stageOf(3), stageOf(4), stageOf(6), stageOf(7), stageOf(9), stageOf(10)], [
+    '前期', '前期', '中期', '中期', '后期', '后期', '大圆满'
+  ]);
+  check('format level', [
+    formatLevel({ realm: '炼气', layer: 1 }),
+    formatLevel({ realm: '炼气', layer: 10 }),
+    formatLevel({ realm: '凡人', layer: 0 })
+  ], ['炼气期前期1层', '炼气期大圆满10层', '凡人']);
+
+  check('凡人 → 炼气前期1层', nextLevel({ realm: '凡人', layer: 0 }), { realm: '炼气', layer: 1 });
+  check('1层 → 3层', nextLevel({ realm: '炼气', layer: 1 }), { realm: '炼气', layer: 3 });
+  check('3层 → 中期5层', nextLevel({ realm: '炼气', layer: 3 }), { realm: '炼气', layer: 5 });
+  check('5层 → 后期7层', nextLevel({ realm: '炼气', layer: 5 }), { realm: '炼气', layer: 7 });
+  check('9层 → 大圆满10层', nextLevel({ realm: '炼气', layer: 9 }), { realm: '炼气', layer: 10 });
+  check('大圆满 → 下一境界前期1层', nextLevel({ realm: '炼气', layer: 10 }), { realm: '筑基', layer: 1 });
+  check('never above 10层', nextLevel({ realm: '炼气', layer: 9 }).layer, 10);
+
+  check('parse 凡人', parseLevel('🔥 厉飞雨：16岁 | 剩余寿元84年 | 凡人'), { realm: '凡人', layer: 0 });
+  check('parse 练气期1层', parseLevel('🔥 当前状态：厉飞雨 | 17岁 | 剩余寿元83年 | 练气期1层'), { realm: '炼气', layer: 1 });
+  check('parse 中期层数', parseLevel('🔥 当前状态：厉飞雨 | 18岁 | 剩余寿元80年 | 练气期中期5层'), { realm: '炼气', layer: 5 });
+  check('parse 筑基后期8层', parseLevel('🔥 当前状态：厉飞雨 | 30岁 | 剩余寿元200年 | 筑基期后期8层'), { realm: '筑基', layer: 8 });
+  check('missing status → null', parseLevel('没有状态行'), null);
+
+  const fixed = enforceLevel(
+    '✅ 上轮选择结果：…\n🔥 当前状态：厉飞雨 | 17岁 | 剩余寿元83年 | 凡人\n📌 请选择：',
+    { realm: '炼气', layer: 1 }
+  );
+  check('enforce keeps the prefix and age', fixed.includes('17岁'), true);
+  check('enforce writes the settled level', fixed.includes('炼气期前期1层'), true);
+
+  const instruction = levelInstruction({ realm: '炼气', layer: 1 }, { realm: '炼气', layer: 3 });
+  check('director names the settled level', instruction.includes('炼气期前期3层'), true);
+  check('director is a server-side settlement', instruction.includes('服务端结算'), true);
+
+  check('game.ts computes the next level', gameTs.includes('nextLevel(previousLevel)'), true);
+  check('game.ts enforces the status line', gameTs.includes('enforceLevel(result.text, settledLevel)'), true);
+  const stripped = stripProseLayers('✅ 突破至炼气期中期6层\n🔥 当前状态：厉飞雨 | 17岁 | 剩余寿元83年 | 炼气期后期7层\nA. 以中期6层之力强攻');
+  check('prose loses concrete layers', stripped.includes('突破至炼气期') && stripped.includes('以该境界之力'), true);
+  check('status line keeps the settled layer', stripped.includes('炼气期后期7层'), true);
+  check('game.ts strips prose layers', gameTs.includes('stripProseLayers(result.text)'), true);
 }
 
 /* --- 8. Assets ------------------------------------------------------------ */

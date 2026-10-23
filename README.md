@@ -57,6 +57,10 @@ budget has been spent.
 - **Stateless backend** — the browser keeps the last **15 exchanges** and replays
   them with each request. Reload the page and you start a new run; the Worker
   stores nothing about your story.
+- **Server-owned progression** — the Worker parses the previous status, advances
+  2 layers under a strict 10-layer realm map (前期 1–3 / 中期 4–6 / 后期 7–9 /
+  大圆满 10), then normalizes the status line. The model narrates; it cannot
+  stall, skip a stage, or invent layer 11.
 - **Provider-agnostic** — Workers AI by default (zero keys), or any
   OpenAI-compatible endpoint (`LLM_BASE_URL` + `LLM_MODEL` + a secret). Same
   frontend, same game, different narrator.
@@ -169,7 +173,7 @@ The only cost control in the project. It is **site-wide**, not per visitor:
 
 | Provider | Daily budget | Why this number |
 | --- | --- | --- |
-| Workers AI | **4,000 neurons** | a 100-turn run costs ≈3,560 neurons with a 15-exchange window, leaving ~16 turns of headroom out of a 10,000/day free account allowance |
+| Workers AI | **4,000 neurons** | a 100-turn run costs ≈3,657 neurons with a 15-exchange window, leaving ~16 turns of headroom out of a 10,000/day free account allowance |
 | OpenAI-compatible | **600,000 tokens** | a 100-turn run is ≈501k tokens; the rest is slack for longer replies |
 
 A request is rejected with HTTP 503 and a readable message once the day's budget

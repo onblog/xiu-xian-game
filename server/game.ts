@@ -47,6 +47,14 @@ import {
 } from './limits.ts';
 import { GAME_FULL_PROMPT } from './prompt.ts';
 import {
+  enforceLevel,
+  levelInstruction,
+  nextLevel,
+  parseLevel,
+  stripProseLayers,
+  type CultivationLevel
+} from './progression.ts';
+import {
   chatCompletion,
   resolveProvider,
   type ChatMessage,
@@ -170,8 +178,12 @@ export const fitHistory = (messages: ChatMessage[], budgetTokens: number): ChatM
  * `messages[0]` is always the full original persona prompt (2929 characters),
  * verbatim — see the warning in `prompt.ts`.
  */
-export const buildMessages = (history: ChatMessage[], choice: string): ChatMessage[] => [
-  { role: 'system', content: GAME_FULL_PROMPT },
+export const buildMessages = (
+  history: ChatMessage[],
+  choice: string,
+  systemPrompt: string = GAME_FULL_PROMPT
+): ChatMessage[] => [
+  { role: 'system', content: systemPrompt },
   ...history,
   { role: 'user', content: choice }
 ];
@@ -257,7 +269,15 @@ export const playChoice = async (env: GameEnv, ctx: GameRequestContext): Promise
   }
 
   const history = fitHistory(sanitizeHistory(ctx.history), historyBudgetTokens());
-  const messages = buildMessages(history, ctx.choice);
+
+  // The server owns the cultivation level. Parse the previous turn, compute the
+  // exact level this turn must end on, and tell the model before generation.
+  const lastAssistant = [...history].reverse().find((message) => message.role === 'assistant');
+  const previousLevel: CultivationLevel | null = lastAssistant === undefined ? null : parseLevel(lastAssistant.content);
+  const settledLevel: CultivationLevel | null = history.length === 0 ? null : nextLevel(previousLevel);
+  const systemPrompt =
+    settledLevel === null ? GAME_FULL_PROMPT : `${GAME_FULL_PROMPT}${levelInstruction(previousLevel, settledLevel)}`;
+  const messages = buildMessages(history, ctx.choice, systemPrompt);
 
   let result: ChatResult;
   try {
@@ -293,6 +313,13 @@ export const playChoice = async (env: GameEnv, ctx: GameRequestContext): Promise
     await addQuota(env.QUOTA, unit, day, 0, true);
     return { ok: false, status: 502, code: 'game-empty-reply', message: '天机紊乱，请稍后重试。', detail: 'empty completion' };
   }
+
+  // Safety net: if the model ignored the settlement line, normalize only the
+  // status line so the next turn parses the intended level.
+  if (settledLevel !== null) {
+    result.text = enforceLevel(result.text, settledLevel);
+  }
+  result.text = stripProseLayers(result.text);
 
   const state = await addQuota(env.QUOTA, unit, day, costOf(provider, result), false);
   return {
