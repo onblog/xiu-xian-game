@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://xiuxian.wordtk.com/sitemap.xml
