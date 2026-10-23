@@ -5,6 +5,8 @@ const gameState = {
     sessionId: generateRandomId(),
     // Recent exchanges replayed with every request (see recordTurn).
     history: [],
+    // Blob URL of the preloaded intro video; null until (or unless) it loads.
+    videoUrl: null,
     loaded: false,
     resources: {
         opening: {
@@ -16,11 +18,17 @@ const gameState = {
     }
 };
 
+// The intro video is fetched during the loading screen with real byte progress,
+// then played from a blob URL so the first frame is instant.
+const VIDEO_URL = 'assets/video/open-video.mp4?v=2';
+const VIDEO_ESTIMATED_BYTES = 959153;
+
 // DOM element references
 const elements = {
     gameContainer: document.getElementById('game-container'),
     loadingContainer: document.getElementById('loading-container'),
     loadingProgress: document.getElementById('loading-progress'),
+    loadingText: document.getElementById('loading-text'),
     musicPrompt: document.getElementById('music-prompt'),
     enableMusicBtn: document.getElementById('enable-music'),
     disableMusicBtn: document.getElementById('disable-music'),
@@ -102,7 +110,7 @@ function playOpeningVideo(callback) {
     // Safari pick the wrong decoder. "video/mp4" lets the browser probe it.
     const source = document.createElement('source');
     // Bump ?v when the file changes: /assets is cached for a day.
-    source.src = 'assets/video/open-video.mp4?v=2';
+    source.src = gameState.videoUrl || VIDEO_URL;
     source.type = 'video/mp4';
     video.appendChild(source);
 
@@ -117,6 +125,10 @@ function playOpeningVideo(callback) {
         if (watchdog !== null) clearTimeout(watchdog);
         video.pause();
         if (video.parentNode) video.parentNode.removeChild(video);
+        if (gameState.videoUrl !== null) {
+            URL.revokeObjectURL(gameState.videoUrl);
+            gameState.videoUrl = null;
+        }
         if (callback) callback();
         createPetalEffect();
     };
@@ -229,7 +241,13 @@ if (elements.bgm.readyState > 3) {
     elements.bgm.load();
 }
 
-// Real asset loading
+// Real asset loading.
+//
+// The intro video is part of this screen. It is fetched as a byte stream so the
+// progress bar reflects the real download; the fetched Blob becomes an object
+// URL that playOpeningVideo() reuses, so the video starts with no second
+// network round trip. A 15s timeout (or a failed fetch) releases the screen and
+// lets the video stream on demand instead of trapping the player.
 function loadResources() {
     const resources = [
         { type: 'image', url: 'assets/images/opening-bg.webp' },
@@ -238,57 +256,107 @@ function loadResources() {
         { type: 'font', url: 'assets/font/LXGWWenKai-Regular.woff2' }
     ];
 
-    let loadedCount = 0;
-    const totalResources = resources.length;
+    let assetsDone = false;
+    let videoDone = false;
+    let finished = false;
+    let videoPercent = 0;
+    let videoBytes = 0;
+    let videoTotal = VIDEO_ESTIMATED_BYTES;
     let checkCount = 0;
     const maxChecks = 5;
 
-    // Create the asset elements and start loading.
-    //
-    // Only images gate the loading screen. The button sound is 14KB and the
-    // font uses font-display: swap, so neither should hold the opening hostage.
-    // Counting load events AND polling used to double-count (progress reached
-    // 125% and completion waited for all five polls), hence the single source
-    // of truth below.
     const resourceElements = resources.map(resource => createResourceElement(resource));
 
-    // Poll the asset state
-    function checkResources() {
-        checkCount++;
-        console.log(`Asset check #${checkCount}`);
-
-        // Inspect each asset. Anything that is not an image counts as ready:
-        // the audio and font must not block the first screen.
-        const currentLoaded = resourceElements.filter(el => !(el instanceof Image) || el.complete).length;
-
-        // Single source of truth for progress (never exceeds 100%).
-        loadedCount = currentLoaded;
-        updateProgress();
-
-        if (loadedCount >= totalResources) {
-            console.log('All assets loaded');
-            completeLoading();
-        } else if (checkCount < maxChecks) {
-            setTimeout(checkResources, 1000);
-        } else {
-            console.log('Asset polling budget spent; continuing');
-            completeLoading();
+    function renderProgress() {
+        const percent = videoDone ? 100 : Math.min(99, videoPercent);
+        elements.loadingProgress.style.width = `${percent}%`;
+        if (elements.loadingText) {
+            elements.loadingText.textContent = finished
+                ? '资源加载完成'
+                : videoDone
+                  ? '资源加载中...'
+                  : `正在加载开场视频 ${percent}%`;
         }
     }
 
-    function updateProgress() {
-        const progress = Math.round((loadedCount / totalResources) * 100);
-        elements.loadingProgress.style.width = `${progress}%`;
-        console.log(`Asset progress: ${progress}%`);
-    }
-
-    function completeLoading() {
+    function maybeComplete() {
+        if (finished || !assetsDone || !videoDone) return;
+        finished = true;
+        renderProgress();
         gameState.loaded = true;
         elements.loadingContainer.style.display = 'none';
         showMusicPrompt();
     }
 
-    // Start polling
+    function markAssetsDone() {
+        if (assetsDone) return;
+        assetsDone = true;
+        renderProgress();
+        maybeComplete();
+    }
+
+    // Real byte-level video preload.
+    const controller = new AbortController();
+    fetch(VIDEO_URL, { signal: controller.signal })
+        .then(response => {
+            if (!response.ok || response.body === null) throw new Error(`HTTP ${response.status}`);
+            const length = Number(response.headers.get('content-length'));
+            if (Number.isFinite(length) && length > 0) videoTotal = length;
+
+            const reader = response.body.getReader();
+            const chunks = [];
+            const pump = () => reader.read().then(({ done, value }) => {
+                if (done) {
+                    gameState.videoUrl = URL.createObjectURL(new Blob(chunks, { type: 'video/mp4' }));
+                    videoPercent = 100;
+                    videoDone = true;
+                    renderProgress();
+                    maybeComplete();
+                    return;
+                }
+                chunks.push(value);
+                videoBytes += value.length;
+                videoPercent = Math.min(99, Math.round((videoBytes / videoTotal) * 100));
+                renderProgress();
+                return pump();
+            });
+            return pump();
+        })
+        .catch(error => {
+            if (error.name !== 'AbortError') {
+                console.warn('Video preload failed, will stream on demand:', error);
+            }
+            videoDone = true;
+            maybeComplete();
+        });
+
+    // Never hold the game hostage for the video.
+    setTimeout(() => {
+        if (videoDone) return;
+        console.warn('Video preload timeout; continuing with on-demand playback');
+        controller.abort();
+        videoDone = true;
+        maybeComplete();
+    }, 15000);
+
+    function checkResources() {
+        checkCount++;
+        console.log(`Asset check #${checkCount}`);
+
+        // Only images gate the loader; audio and font must not hold the screen.
+        const currentLoaded = resourceElements.filter(el => !(el instanceof Image) || el.complete).length;
+        if (currentLoaded >= resources.length) {
+            console.log('All assets loaded');
+            markAssetsDone();
+        } else if (checkCount < maxChecks) {
+            setTimeout(checkResources, 1000);
+        } else {
+            console.log('Asset polling budget spent; continuing');
+            markAssetsDone();
+        }
+    }
+
+    renderProgress();
     checkResources();
 }
 
