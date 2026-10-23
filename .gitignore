@@ -1,0 +1,29 @@
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Dependencies
+node_modules/
+
+# Wrangler local state and local secrets
+.wrangler/
+.dev.vars
+.dev.vars.*
+
+# Local overrides and logs
+*.local
+*.log
+npm-debug.log*
+debug.log
+
+# Build output and coverage
+dist/
+build/
+coverage/
+
+# Temporary files
+*.tmp
+*.temp
+archive.zip

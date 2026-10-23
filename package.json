@@ -1,0 +1,27 @@
+{
+  "name": "xiu-xian-game",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Xianxia text RPG on Cloudflare Workers — Workers AI narration, no database, one daily experience budget. 凡人修仙传之我是厉飞雨",
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/onblog/xiu-xian-game.git"
+  },
+  "homepage": "https://xiuxian.wordtk.com",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "check": "tsc -p tsconfig.json",
+    "verify": "node scripts/verify.mts"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260926.1",
+    "typescript": "^5.9.0",
+    "wrangler": "^4.150.0"
+  }
+}

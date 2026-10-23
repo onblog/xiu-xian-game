@@ -1,0 +1,54 @@
+#:schema node_modules/wrangler/config-schema.json
+name = "xiu-xian-game"
+main = "server/index.ts"
+compatibility_date = "2026-10-13"
+# No nodejs_compat needed: everything is Web API (fetch / JSON / Response / caches).
+
+# ---- Domain ------------------------------------------------------------------
+# Keep the workers.dev hostname off: the site is public only through the custom
+# domain. A Custom Domain also creates the DNS record and certificate for
+# xiuxian.wordtk.com.
+workers_dev = false
+
+[[routes]]
+pattern = "xiuxian.wordtk.com"
+custom_domain = true
+
+# ---- Static assets -----------------------------------------------------------
+# The game itself is static H5 (index.html + css + js + assets) served by the
+# assets layer. `run_worker_first` only admits /api/*, so opening the game and
+# loading its media costs zero Worker invocations.
+[assets]
+directory = "./public"
+binding = "ASSETS"
+# Anything that is not a static file falls through to the Worker only for the
+# /api/* paths listed below.
+not_found_handling = "none"
+run_worker_first = ["/api/*", "/api"]
+
+# ---- Daily experience budget -------------------------------------------------
+# One KV document per day and unit (`quota:neurons:YYYY-MM-DD`). No database:
+# conversation history lives in the browser and is replayed with each request.
+[[kv_namespaces]]
+binding = "QUOTA"
+id = "c49fdba45586414c93fb140726807b22"
+
+# ---- Workers AI (default provider) -------------------------------------------
+# Optional when LLM_BASE_URL points at an OpenAI-compatible endpoint; the Worker
+# then never touches this binding.
+[ai]
+binding = "AI"
+
+# ---- Observability -----------------------------------------------------------
+# Free plan: 200k log events/day, 3-day retention. Traffic is small, so sample
+# everything to keep debugging simple.
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+# Logs and traces are separate switches: enabling one does not enable the other.
+[observability.traces]
+enabled = true
+
+[observability.logs]
+enabled = true

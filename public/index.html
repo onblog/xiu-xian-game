@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>凡人修仙传之我是厉飞雨</title>
+    <link rel="stylesheet" href="css/style.css">
+    <meta name="description" content="凡人修仙传之我是厉飞雨 — 一个由 Cloudflare Workers AI 驱动的文字修仙游戏。">
+    <meta name="theme-color" content="#2b1d0e">
+    <link rel="shortcut icon" href="favicon.ico" />
+
+</head>
+<body>
+    <div id="game-container">
+        <!-- Settings icon -->
+        <div id="settings-icon" class="settings-icon">
+            <img src="assets/images/settings-gear.svg" width="24" height="24" alt="设置">
+        </div>
+        <img id="background" src="" alt="游戏背景">
+        <div id="loading-container">
+            <div>资源加载中...</div>
+            <div id="loading-bar">
+                <div id="loading-progress"></div>
+            </div>
+        </div>
+        <div id="music-prompt" class="modal">
+            <div class="modal-content">
+                <p>是否打开背景音乐？</p>
+                <div class="modal-options">
+                    <button id="enable-music" class="btn">打开</button>
+                    <button id="disable-music" class="btn">不了</button>
+                </div>
+            </div>
+        </div>
+        <div id="opening-text"></div>
+        <div id="story-text"></div>
+        <div id="options-container"></div>
+        <!-- Settings modal -->
+        <div id="settings-modal" class="modal">
+            <div class="modal-content settings-modal-content">
+                <h3>设置</h3>
+                <div class="setting-item">
+                    <label>音乐开关</label>
+                    <div class="radio-group">
+                        <label>
+                            <input type="radio" name="music-toggle" value="on"> 打开
+                        </label>
+                        <label>
+                            <input type="radio" name="music-toggle" value="off"> 关闭
+                        </label>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <label for="music-volume">音乐音量</label>
+                    <input type="range" id="music-volume" min="0" max="100" value="50" class="volume-slider">
+                    <span id="volume-value">50</span>
+                </div>
+                <div class="modal-options">
+                    <button id="close-settings" class="btn">关闭</button>
+                </div>
+                <!-- AGPL-3.0 §13: network users are offered the source. -->
+                <a class="source-link" href="https://github.com/onblog/xiu-xian-game" target="_blank" rel="noopener noreferrer">源码 / Source</a>
+            </div>
+        </div>
+    </div>
+    <audio id="bgm" loop src="assets/audio/bgm.mp3"></audio>
+    <audio id="btn-sound" src="assets/audio/button.mp3"></audio>
+    <script src="js/game.js"></script>
+</body>
+</html>

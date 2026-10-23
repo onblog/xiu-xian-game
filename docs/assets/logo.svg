@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="凡人修仙传之我是厉飞雨">
+  <defs>
+    <linearGradient id="ink" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#241a0e"/>
+      <stop offset="1" stop-color="#3d2b16"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f3dfa6"/>
+      <stop offset="0.5" stop-color="#c9a052"/>
+      <stop offset="1" stop-color="#8a6224"/>
+    </linearGradient>
+    <linearGradient id="blade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#e8f2f5"/>
+      <stop offset="0.45" stop-color="#ffffff"/>
+      <stop offset="0.55" stop-color="#cfe0e6"/>
+      <stop offset="1" stop-color="#9fb6bf"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.42" r="0.62">
+      <stop offset="0" stop-color="#7fd6e0" stop-opacity="0.30"/>
+      <stop offset="0.55" stop-color="#7fd6e0" stop-opacity="0.06"/>
+      <stop offset="1" stop-color="#7fd6e0" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="frame">
+      <rect x="16" y="16" width="480" height="480" rx="104"/>
+    </clipPath>
+  </defs>
+
+  <rect x="16" y="16" width="480" height="480" rx="104" fill="url(#ink)"/>
+  <g clip-path="url(#frame)">
+    <rect x="16" y="16" width="480" height="480" fill="url(#glow)"/>
+
+    <!-- drifting clouds -->
+    <g fill="none" stroke="#c9a052" stroke-opacity="0.22" stroke-width="6" stroke-linecap="round">
+      <path d="M28 372c46-26 84-26 120 0s78 26 126 0 92-26 132 0 64 22 86 6"/>
+      <path d="M10 410c52-24 92-24 128 0s80 24 128 0 96-24 138 0 68 20 92 4"/>
+      <path d="M60 336c34-18 62-18 88 0s56 18 90 0 62-18 92 0"/>
+    </g>
+
+    <!-- mountains -->
+    <path d="M28 352 116 246l58 66 70-104 74 104 46-52 92 92v104H28z" fill="#0f0b05" fill-opacity="0.55"/>
+    <path d="M28 380 128 300l70 52 80-76 68 76 38-28 60 56v72H28z" fill="#0a0703" fill-opacity="0.6"/>
+
+    <!-- sword -->
+    <g>
+      <path d="M256 78c16 24 22 46 22 66v186h-44V144c0-20 6-42 22-66z" fill="url(#blade)"/>
+      <path d="M256 78v252h-10V144c0-20 5-42 10-66z" fill="#ffffff" fill-opacity="0.55"/>
+      <rect x="198" y="330" width="116" height="20" rx="10" fill="url(#gold)"/>
+      <rect x="242" y="350" width="28" height="88" rx="12" fill="#2b1d0e" stroke="#c9a052" stroke-width="5"/>
+      <circle cx="256" cy="452" r="16" fill="url(#gold)"/>
+      <circle cx="256" cy="452" r="6" fill="#2b1d0e"/>
+    </g>
+
+    <!-- spark -->
+    <path d="M256 44l7 19 19 7-19 7-7 19-7-19-19-7 19-7z" fill="#f3dfa6" fill-opacity="0.9"/>
+  </g>
+
+  <rect x="26" y="26" width="460" height="460" rx="96" fill="none" stroke="url(#gold)" stroke-opacity="0.75" stroke-width="4"/>
+</svg>
