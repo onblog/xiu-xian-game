@@ -79,6 +79,7 @@ function playOpeningVideo(callback) {
 
     let finished = false;
     let watchdog = null;
+    let blobFallback = null;
 
     // Create the video element.
     //
@@ -101,20 +102,20 @@ function playOpeningVideo(callback) {
     video.setAttribute('playsinline', '');
     video.setAttribute('webkit-playsinline', '');
     video.disablePictureInPicture = true;
-    // Show the title art while the first frame is being fetched, so a slow
-    // mobile connection never presents a pure black screen.
+    // The intro has no audio track. Muting before the source is set is what
+    // makes iOS treat it as muted autoplay; the play() call happens later in
+    // the canplay handler, outside the original tap gesture.
+    video.muted = true;
+    video.setAttribute('muted', '');
+    // Show the title art while the first frame is decoded, so a slow mobile
+    // connection never presents a pure black screen.
     video.poster = 'assets/images/opening-bg.webp';
 
-    // The only source we ship. Do not over-specify the codec: the file is
-    // H.264 High 4.1, and the old "avc1.42E01E" (Baseline 3.0) claim made
-    // Safari pick the wrong decoder. "video/mp4" lets the browser probe it.
-    const source = document.createElement('source');
-    // Bump ?v when the file changes: /assets is cached for a day.
-    source.src = gameState.videoUrl || VIDEO_URL;
-    source.type = 'video/mp4';
-    video.appendChild(source);
-
+    // Use the preloaded Blob directly. iOS Safari is unreliable with a
+    // <source> child pointing at a blob: URL; a direct video.src works.
+    video.src = gameState.videoUrl || VIDEO_URL;
     video.preload = 'auto';
+    video.load();
 
     document.body.appendChild(video);
     console.log('Video element attached to the DOM');
@@ -123,6 +124,7 @@ function playOpeningVideo(callback) {
         if (finished) return;
         finished = true;
         if (watchdog !== null) clearTimeout(watchdog);
+        if (blobFallback !== null) clearTimeout(blobFallback);
         video.pause();
         if (video.parentNode) video.parentNode.removeChild(video);
         if (gameState.videoUrl !== null) {
@@ -133,25 +135,53 @@ function playOpeningVideo(callback) {
         createPetalEffect();
     };
 
+    let playAttempted = false;
+    let networkFallback = false;
+
     const startPlayback = () => {
+        if (playAttempted || finished) return;
+        playAttempted = true;
         video.play().then(() => {
             console.log('Video: playing');
-        }).catch(() => {
-            // Audible playback was blocked (mobile). Muted playback is always
-            // allowed; losing the intro audio beats a permanently stuck page.
-            video.muted = true;
-            video.play().then(() => {
-                console.log('Video: playing muted');
-            }).catch((error) => {
-                console.error('Video playback failed, skipping:', error);
-                finish();
-            });
+        }).catch(error => {
+            // The element is already muted, so this is not an autoplay-policy
+            // failure. Try the network URL once in case the Blob is the problem.
+            if (!networkFallback && gameState.videoUrl !== null) {
+                networkFallback = true;
+                playAttempted = false;
+                video.src = VIDEO_URL;
+                video.load();
+                return;
+            }
+            console.error('Video playback failed, skipping:', error);
+            finish();
         });
     };
 
-    video.addEventListener('canplay', startPlayback, { once: true });
+    // `loadeddata` covers Safari versions that do not emit `canplay` for a
+    // Blob source; the guard above keeps it to one attempt.
+    video.addEventListener('canplay', startPlayback);
+    video.addEventListener('loadeddata', startPlayback);
     video.addEventListener('ended', finish);
+
+    // Safari can load a Blob without ever firing canplay/loadeddata. If the
+    // video has not even attempted playback after 3s, retry the same file over
+    // the network; the Cloudflare edge copy is already warm from the preload.
+    blobFallback = setTimeout(() => {
+        if (finished || playAttempted || gameState.videoUrl === null || networkFallback) return;
+        console.warn('Blob playback did not start, retrying with the network URL');
+        networkFallback = true;
+        video.src = VIDEO_URL;
+        video.load();
+    }, 3000);
     video.addEventListener('error', () => {
+        if (!networkFallback && gameState.videoUrl !== null) {
+            networkFallback = true;
+            playAttempted = false;
+            video.src = VIDEO_URL;
+            video.load();
+            return;
+        }
         console.error('Video failed to load, skipping');
         finish();
     });
