@@ -137,6 +137,16 @@ section('Frontend: stateless backend, browser-owned history, no fingerprint');
   check('reads the clean SSE payload', gameJs.includes('jsonData.text') && gameJs.includes('jsonData.done'), true);
   check('history cap mirrors the server (30 messages)', /MAX_HISTORY_MESSAGES = 30/.test(gameJs), true);
   check('timeout allows a slow provider (60s)', gameJs.includes('60000'), true);
+
+  // Mobile autoplay: the intro video must never be able to cover the page forever.
+  check('video requests inline playback', gameJs.includes('video.playsInline = true'), true);
+  check('video declares the playsinline attribute', gameJs.includes("setAttribute('playsinline', '')"), true);
+  check('video falls back to muted playback', gameJs.includes('video.muted = true'), true);
+  check('video has a watchdog', gameJs.includes('Video watchdog fired'), true);
+  check('BGM is lazy-loaded on demand', gameJs.includes('if (!elements.bgm.src)'), true);
+  check('BGM is not in the preload list', gameJs.includes("url: 'assets/audio/bgm.mp3'"), false);
+  check('loading progress cannot exceed 100%', gameJs.includes('loadedCount = currentLoaded'), true);
+  check('static assets are cached for a day', readTextIfExists('public/_headers').includes('max-age=86400'), true);
   check('shows the Worker reason on failure', gameJs.includes('showRetry(error)'), true);
 
   // Volume: default 50 in HTML and actually applied on load.

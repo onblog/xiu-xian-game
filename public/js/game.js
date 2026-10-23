@@ -56,13 +56,23 @@ elements.gameContainer.appendChild(apiLoadingContainer);
 function initGame() {
     loadResources(); // Load the real assets
     elements.background.src = gameState.resources.opening.bgImage;
-    elements.bgm.src = 'assets/audio/bgm.mp3';
     elements.bgm.loop = true;
 }
 
-// Play the opening video, then run the callback
+// Play the opening video, then run the callback.
+//
+// Mobile autoplay policy is the dangerous part here. iOS and Android block
+// audible autoplay; if play() is rejected and nothing else happens, the
+// full-screen video layer (z-index 9999) would stay on top forever — which
+// looks exactly like "the site does not open". Therefore:
+//   - always ask for inline playback, never fullscreen;
+//   - try audible playback first, fall back to muted, then skip entirely;
+//   - a watchdog removes the layer even when no media event ever fires.
 function playOpeningVideo(callback) {
     console.log('Playing the opening video…');
+
+    let finished = false;
+    let watchdog = null;
 
     // Create the video element
     const video = document.createElement('video');
@@ -73,72 +83,61 @@ function playOpeningVideo(callback) {
     video.style.height = '100%';
     video.style.objectFit = 'cover';
     video.style.zIndex = '9999';
-    video.style.backgroundColor = '#000'; // Black background so the swap is invisible
+    video.style.backgroundColor = '#000'; // black so the swap is invisible
+    video.playsInline = true;
+    video.setAttribute('playsinline', '');
+    video.setAttribute('webkit-playsinline', '');
+    video.disablePictureInPicture = true;
 
-    // Offer every codec we have
+    // The only source we ship: H.264 + AAC in an MP4 container.
     const source = document.createElement('source');
     source.src = 'assets/video/open-video.mp4';
     source.type = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"';
     video.appendChild(source);
 
-    // Preload the video
     video.preload = 'auto';
 
-    // Attach it to the game container
     elements.gameContainer.appendChild(video);
     console.log('Video element attached to the DOM');
 
-    // Extra listeners, kept for debugging
-    video.addEventListener('loadstart', () => {
-        console.log('Video: loadstart');
-    });
+    const finish = () => {
+        if (finished) return;
+        finished = true;
+        if (watchdog !== null) clearTimeout(watchdog);
+        video.pause();
+        if (video.parentNode) video.parentNode.removeChild(video);
+        if (callback) callback();
+        createPetalEffect();
+    };
 
-    video.addEventListener('loadeddata', () => {
-        console.log('Video: loadeddata');
-    });
-
-    video.addEventListener('canplay', () => {
-        console.log('Video: canplay');
+    const startPlayback = () => {
         video.play().then(() => {
             console.log('Video: playing');
-        }).catch(e => {
-            console.error('Video autoplay blocked:', e);
-            // Continue even when autoplay is blocked
+        }).catch(() => {
+            // Audible playback was blocked (mobile). Muted playback is always
+            // allowed; losing the intro audio beats a permanently stuck page.
+            video.muted = true;
             video.play().then(() => {
-                console.log('Video started after a user gesture');
-            }).catch(e2 => {
-                console.error('Video playback failed:', e2);
+                console.log('Video: playing muted');
+            }).catch((error) => {
+                console.error('Video playback failed, skipping:', error);
+                finish();
             });
         });
-    }, { once: true });
+    };
 
-    video.addEventListener('playing', () => {
-        console.log('Video: play');
-    });
-
-    // Handle the end of the video
-    video.addEventListener('ended', () => {
-        console.log('Video: ended');
-        // Remove the video element
-        elements.gameContainer.removeChild(video);
-        // Run the callback (the original post-video flow)
-        if (callback) callback();
-        
-        // Start the petal effect
-        createPetalEffect();
-    });
-
-    // Video failed to load: go straight to the game
+    video.addEventListener('canplay', startPlayback, { once: true });
+    video.addEventListener('ended', finish);
     video.addEventListener('error', () => {
-        console.error('Video failed to load:');
-        console.error('src:', video.src);
-        console.error('code:', video.error ? video.error.code : 'unknown');
-        console.error('networkState:', video.networkState);
-        console.error('readyState:', video.readyState);
-
-        elements.gameContainer.removeChild(video);
-        if (callback) callback();
+        console.error('Video failed to load, skipping');
+        finish();
     });
+
+    // Hard stop for a stalled network or a browser that never fires `ended`.
+    watchdog = setTimeout(() => {
+        console.warn('Video watchdog fired, skipping');
+        finish();
+    }, 10000);
 }
 
 // Show the music prompt
@@ -190,12 +189,19 @@ function showMusicPrompt() {
 
 // Start the background music
 function startBackgroundMusic() {
+    // The BGM is ~970KB. It is deliberately not preloaded: players who decline
+    // music should not pay for it on a mobile connection.
+    if (!elements.bgm.src) {
+        elements.bgm.src = 'assets/audio/bgm.mp3';
+        elements.bgm.load();
+    }
+
     // Pause first so the state is fully reset
     elements.bgm.pause();
     elements.bgm.currentTime = 0;
 
     // Try to play right away
-    const playAttempt = elements.bgm.play()
+    elements.bgm.play()
         .then(() => console.log('Background music started'))
         .catch(e => {
             console.log('Autoplay blocked:', e);
@@ -217,7 +223,6 @@ function loadResources() {
     const resources = [
         { type: 'image', url: 'assets/images/opening-bg.webp' },
         { type: 'image', url: 'assets/images/game-bg.webp' },
-        { type: 'audio', url: 'assets/audio/bgm.mp3' },
         { type: 'audio', url: 'assets/audio/button.mp3' },
         { type: 'font', url: 'assets/font/LXGWWenKai-Regular.woff2' }
     ];
@@ -227,38 +232,29 @@ function loadResources() {
     let checkCount = 0;
     const maxChecks = 5;
 
-    // Create the asset elements and start loading
-    const resourceElements = resources.map(resource => {
-        const element = createResourceElement(resource);
-        element.onload = () => {
-            loadedCount++;
-            updateProgress();
-        };
-        element.onerror = () => {
-            console.warn(`Asset failed: ${resource.url}`);
-            loadedCount++; // Count failures towards progress too
-            updateProgress();
-        };
-        return element;
-    });
+    // Create the asset elements and start loading.
+    //
+    // Only images gate the loading screen. The button sound is 14KB and the
+    // font uses font-display: swap, so neither should hold the opening hostage.
+    // Counting load events AND polling used to double-count (progress reached
+    // 125% and completion waited for all five polls), hence the single source
+    // of truth below.
+    const resourceElements = resources.map(resource => createResourceElement(resource));
 
     // Poll the asset state
     function checkResources() {
         checkCount++;
         console.log(`Asset check #${checkCount}`);
 
-        // Inspect each asset
-        const currentLoaded = resourceElements.filter(el => {
-            if (el instanceof Image) return el.complete;
-            if (el instanceof Audio) return el.readyState >= 3;
-            return true; // Fonts and other resources report no size
-        }).length;
+        // Inspect each asset. Anything that is not an image counts as ready:
+        // the audio and font must not block the first screen.
+        const currentLoaded = resourceElements.filter(el => !(el instanceof Image) || el.complete).length;
 
-        // Update the progress bar
-        loadedCount = Math.max(loadedCount, currentLoaded);
+        // Single source of truth for progress (never exceeds 100%).
+        loadedCount = currentLoaded;
         updateProgress();
 
-        if (loadedCount === totalResources) {
+        if (loadedCount >= totalResources) {
             console.log('All assets loaded');
             completeLoading();
         } else if (checkCount < maxChecks) {
