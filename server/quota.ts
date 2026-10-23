@@ -48,10 +48,12 @@ export const dailyBudgetFor = (unit: QuotaUnit): number =>
 /**
  * KV key: one document per unit per day.
  *
- * Separate keys per unit mean switching provider mid-day does not corrupt the
- * ledger, and each document stays tiny (a single JSON object).
+ * The namespace (`common`) is shared with the other projects, so every key starts
+ * with the `xiuxian:` prefix. Separate keys per unit mean switching provider
+ * mid-day does not corrupt the ledger, and each document stays tiny (a single
+ * JSON object).
  */
-export const quotaKey = (unit: QuotaUnit, day: string): string => `quota:${unit}:${day}`;
+export const quotaKey = (unit: QuotaUnit, day: string): string => `xiuxian:quota:${unit}:${day}`;
 
 /** Keep yesterday around briefly for debugging; the game itself never looks back. */
 const QUOTA_TTL_SECONDS = 60 * 60 * 24 * 7;

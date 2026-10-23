@@ -83,7 +83,7 @@
                 │
 Worker  （server/ —— 只有 /api/* 会唤起它）
   ├─ 校验选择、清洗并二次裁剪历史（最多 30 条消息）
-  ├─ 每日额度判定            KV  quota:neurons:YYYY-MM-DD
+  ├─ 每日额度判定            KV  xiuxian:quota:neurons:YYYY-MM-DD
   ├─ Provider               env.AI.run(...)  |  POST {LLM_BASE_URL}/chat/completions
   └─ SSE                    data: {"text":"…","done":true}
                 │
@@ -105,8 +105,9 @@ Worker  （server/ —— 只有 /api/* 会唤起它）
 ```bash
 npm install
 
-# 1. 创建额度账本，把 id 填进 wrangler.toml
-npx wrangler kv namespace create xiu-xian-game
+# 1. 复用共用的 `common` KV 命名空间（每账号一个）；本项目的键一律以 `xiuxian:` 开头
+#    把 id 填进 wrangler.toml
+npx wrangler kv namespace create common
 
 # 2. 起本地 dev（GAME_STUB=1 不调模型，但校验与额度照走）
 npx wrangler dev --var GAME_STUB:1
@@ -188,7 +189,7 @@ npx wrangler deploy
 ## 部署
 
 ```bash
-npx wrangler kv namespace create xiu-xian-game   # 只需一次；把 id 填进 wrangler.toml
+npx wrangler kv namespace create common   # 每账号一次；把 id 填进 wrangler.toml
 npx wrangler deploy
 ```
 

@@ -94,7 +94,7 @@ Browser  (public/ — static, cached by Cloudflare, zero Worker invocations)
                 │
 Worker   (server/ — starts on /api/* only)
   ├─ validate choice, sanitize and re-trim history (30 messages max)
-  ├─ daily budget check        KV  quota:neurons:YYYY-MM-DD
+  ├─ daily budget check        KV  xiuxian:quota:neurons:YYYY-MM-DD
   ├─ provider                  env.AI.run(...)  |  POST {LLM_BASE_URL}/chat/completions
   └─ SSE                       data: {"text":"…","done":true}
                 │
@@ -118,8 +118,9 @@ stream's first token.
 ```bash
 npm install
 
-# 1. create the budget ledger and copy the id into wrangler.toml
-npx wrangler kv namespace create xiu-xian-game
+# 1. reuse the shared `common` KV namespace (one per account); this project's keys
+#    all start with `xiuxian:` — copy the id into wrangler.toml
+npx wrangler kv namespace create common
 
 # 2. run locally (GAME_STUB=1 skips the model but keeps validation + budget)
 npx wrangler dev --var GAME_STUB:1
@@ -209,7 +210,7 @@ characters, and the array is trimmed to the newest 30 messages.
 ## Deploy
 
 ```bash
-npx wrangler kv namespace create xiu-xian-game   # once; put the id in wrangler.toml
+npx wrangler kv namespace create common   # once per account; put the id in wrangler.toml
 npx wrangler deploy
 ```
 

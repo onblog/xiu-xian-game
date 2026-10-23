@@ -27,11 +27,12 @@ not_found_handling = "none"
 run_worker_first = ["/api/*", "/api"]
 
 # ---- Daily experience budget -------------------------------------------------
-# One KV document per day and unit (`quota:neurons:YYYY-MM-DD`). No database:
+# One KV document per day and unit (`xiuxian:quota:neurons:YYYY-MM-DD`), living in
+# the shared `common` namespace: every key carries the `xiuxian:` prefix. No database:
 # conversation history lives in the browser and is replayed with each request.
 [[kv_namespaces]]
 binding = "QUOTA"
-id = "c49fdba45586414c93fb140726807b22"
+id = "a81355effe1948efba1e9cf97ae3d04a"
 
 # ---- Workers AI (default provider) -------------------------------------------
 # Optional when LLM_BASE_URL points at an OpenAI-compatible endpoint; the Worker
