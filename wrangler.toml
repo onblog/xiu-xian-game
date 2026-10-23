@@ -5,14 +5,11 @@ compatibility_date = "2026-10-13"
 # No nodejs_compat needed: everything is Web API (fetch / JSON / Response / caches).
 
 # ---- Domain ------------------------------------------------------------------
-# Keep the workers.dev hostname off: the site is public only through the custom
-# domain. A Custom Domain also creates the DNS record and certificate for
-# xiuxian.wordtk.com.
+# Keep the workers.dev hostname off: the site is public only through its custom
+# domain. The domain binding itself lives in the Cloudflare dashboard
+# (Worker → Settings → Domains & Routes), so this repo carries no live domain.
 workers_dev = false
 
-[[routes]]
-pattern = "xiuxian.wordtk.com"
-custom_domain = true
 
 # ---- Static assets -----------------------------------------------------------
 # The game itself is static H5 (index.html + css + js + assets) served by the
