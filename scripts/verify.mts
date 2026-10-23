@@ -108,7 +108,9 @@ section('The persona prompt is the original, verbatim (2929 characters)');
   check('runtime contract is appended, not merged', GAME_FULL_PROMPT.startsWith(GAME_SYSTEM_PROMPT), true);
   check('runtime contract requires echoing the chosen option', GAME_RUNTIME_PROMPT.includes('必须复述该选项的字母与原文动作'), true);
   check('runtime contract forbids repeating the event', GAME_RUNTIME_PROMPT.includes('禁止重复「✅」'), true);
-  check('runtime contract limits level jumps', GAME_RUNTIME_PROMPT.includes('单轮最多推进一个小层级'), true);
+  check('runtime contract requires progress every turn', GAME_RUNTIME_PROMPT.includes('至少提升 1 个小层级、最多提升 3 个小层级'), true);
+  check('runtime contract forbids male romance', GAME_RUNTIME_PROMPT.includes('严禁与韩立或其他男性角色结为道侣'), true);
+  check('runtime contract separates 结丹 from relationships', GAME_RUNTIME_PROMPT.includes('「结丹」是境界名'), true);
 }
 
 section('Opening line: frontend constant and server constant agree');
@@ -245,7 +247,7 @@ section('One gate only: the site-wide daily experience budget');
     const hist = Math.min(n - 1, GAME_HISTORY_MAX_EXCHANGES) * 174;
     spent += estimateNeurons(GAME_MODEL, promptTokens + hist, 394);
   }
-  check('a 100-turn run costs ≈3478 neurons', Math.round(spent), 3478);
+  check('a 100-turn run costs ≈3553 neurons', Math.round(spent), 3553);
   check('a 100-turn run fits in 90% of the daily budget', spent <= GAME_NEURON_DAILY_BUDGET * 0.9, true);
 
   // Token side: a 100-turn run must fit the OpenAI-compatible budget too.
