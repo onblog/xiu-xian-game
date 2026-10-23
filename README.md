@@ -27,7 +27,7 @@
 
 > You wake up as **Li Feiyu**, a blade disciple of the Seven Mysteries Sect, three
 > years before Han Li arrives. Every scene is written by a language model from a
-> verbatim 2,929-character persona prompt: age, lifespan and cultivation stage are
+> verbatim 2,929-character persona prompt plus a short runtime contract: age, lifespan and cultivation stage are
 > advanced by the model, not by a script. You pick **A / B / C**, and the story
 > moves forward — through the sect, the mortal world, and eventually the tribulation.
 
@@ -169,7 +169,7 @@ The only cost control in the project. It is **site-wide**, not per visitor:
 
 | Provider | Daily budget | Why this number |
 | --- | --- | --- |
-| Workers AI | **4,000 neurons** | a 100-turn run costs ≈3,335 neurons with a 15-exchange window, leaving ~16 turns of headroom out of a 10,000/day free account allowance |
+| Workers AI | **4,000 neurons** | a 100-turn run costs ≈3,478 neurons with a 15-exchange window, leaving ~16 turns of headroom out of a 10,000/day free account allowance |
 | OpenAI-compatible | **600,000 tokens** | a 100-turn run is ≈501k tokens; the rest is slack for longer replies |
 
 A request is rejected with HTTP 503 and a readable message once the day's budget
@@ -182,7 +182,7 @@ provider, so switching models mid-day does not corrupt the counter.
 > hard cap, replace `server/quota.ts` with a Durable Object.
 
 Why 15 exchanges: every turn re-reads the replay window, so the window is the
-cost knob. At 15 exchanges a steady-state turn costs ≈34 neurons; the full
+cost knob. At 15 exchanges a steady-state turn costs ≈36 neurons; the full
 100-turn arc still fits in one day's budget.
 
 ## API
@@ -226,7 +226,7 @@ server/
   ai.ts               provider resolution + the two call paths
   quota.ts            KV daily ledger (soft cap, documented)
   limits.ts           budgets, neuron rates, token estimation
-  prompt.ts           the 2,929-character persona prompt, verbatim
+  prompt.ts           the 2,929-character persona prompt + runtime contract
 scripts/verify.mts    invariant checks (prompt, SSE, budget, assets, hygiene)
 docs/                 logo, screenshots, en/ and zh-CN/ configuration notes
 ```

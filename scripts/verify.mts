@@ -32,7 +32,13 @@ import {
   estimateNeurons,
   estimateTokens
 } from '../server/limits.ts';
-import { GAME_AGENT_OPENING, GAME_OPENING_TEXT, GAME_SYSTEM_PROMPT } from '../server/prompt.ts';
+import {
+  GAME_AGENT_OPENING,
+  GAME_FULL_PROMPT,
+  GAME_OPENING_TEXT,
+  GAME_RUNTIME_PROMPT,
+  GAME_SYSTEM_PROMPT
+} from '../server/prompt.ts';
 import {
   buildMessages,
   fitHistory,
@@ -68,6 +74,7 @@ const wrangler = readText('wrangler.toml');
 const indexTs = readText('server/index.ts');
 const aiTs = readText('server/ai.ts');
 const limitsTs = readText('server/limits.ts');
+const gameTs = readText('server/game.ts');
 
 // Strip block comments first (they span lines), then line comments.
 const codeOnly = (source: string): string =>
@@ -96,6 +103,12 @@ section('The persona prompt is the original, verbatim (2929 characters)');
   check('contains the opening trigger', GAME_SYSTEM_PROMPT.includes('当用户回复“是”的时候'), true);
   check('contains the realm table', GAME_SYSTEM_PROMPT.includes('炼气期是可施展简单法术'), true);
   check('does not contain the old condensed draft', GAME_SYSTEM_PROMPT.includes('【文风要求】'), false);
+
+  // The runtime contract lives outside the persona, so the original stays verbatim.
+  check('runtime contract is appended, not merged', GAME_FULL_PROMPT.startsWith(GAME_SYSTEM_PROMPT), true);
+  check('runtime contract requires echoing the chosen option', GAME_RUNTIME_PROMPT.includes('必须复述该选项的字母与原文动作'), true);
+  check('runtime contract forbids repeating the event', GAME_RUNTIME_PROMPT.includes('禁止重复「✅」'), true);
+  check('runtime contract limits level jumps', GAME_RUNTIME_PROMPT.includes('单轮最多推进一个小层级'), true);
 }
 
 section('Opening line: frontend constant and server constant agree');
@@ -133,7 +146,8 @@ section('Frontend: stateless backend, browser-owned history, no fingerprint');
   check('sends a session id for log correlation', gameJs.includes('sessionId: gameState.sessionId'), true);
   check('sends the replay window', /choice: choice,\s*\n\s*history: history/.test(gameJs), true);
   check('keeps history in game state', /history: \[\]/.test(gameJs), true);
-  check('records only successful turns', gameJs.includes('recordTurn(choice, response)'), true);
+  check('records the turn from the stream end', gameJs.includes('recordTurn(choice, finalText)'), true);
+  check('does not rely on the undefined chain value', gameJs.includes('recordTurn(choice, response)'), false);
   check('reads the clean SSE payload', gameJs.includes('jsonData.text') && gameJs.includes('jsonData.done'), true);
   check('history cap mirrors the server (30 messages)', /MAX_HISTORY_MESSAGES = 30/.test(gameJs), true);
   check('timeout allows a slow provider (60s)', gameJs.includes('60000'), true);
@@ -195,7 +209,8 @@ section('Request validation and replay trimming');
 
   const msgs = buildMessages([{ role: 'user', content: '是' }, { role: 'assistant', content: '✅ …' }], 'A');
   check('1 system + 2 history + 1 current', msgs.length, 4);
-  check('messages[0] is the full prompt', msgs[0]!.content.length, 2929);
+  check('messages[0] is persona + runtime contract', msgs[0]!.content.length, GAME_FULL_PROMPT.length);
+  check('messages[0] starts with the verbatim persona', msgs[0]!.content.startsWith(GAME_SYSTEM_PROMPT), true);
   check('current input is last', [msgs[3]!.role, msgs[3]!.content], ['user', 'A']);
 }
 
@@ -207,11 +222,13 @@ section('One gate only: the site-wide daily experience budget');
   check('the default model has a registered rate', qwen !== undefined, true);
   check('output costs 6.6× input', Math.round((qwen!.output / qwen!.input) * 10) / 10, 6.6);
 
-  // Measured: prompt ≈2213 tokens, reply ≈229 chars (≈174 tokens), output ≈394 tokens.
-  const firstTurn = estimateNeurons(GAME_MODEL, 2214, 394);
-  const steadyTurn = estimateNeurons(GAME_MODEL, 2213 + GAME_HISTORY_MAX_EXCHANGES * 174, 394);
-  check('turn 1 ≈ 22 neurons', Math.round(firstTurn), 22);
-  check(`steady turn ≈ 34 neurons (${GAME_HISTORY_MAX_EXCHANGES}-exchange window)`, Math.round(steadyTurn), 34);
+  // Measured: persona + runtime contract ≈2522 tokens, each reply ≈174 tokens,
+  // each output ≈394 tokens.
+  const promptTokens = estimateTokens(GAME_FULL_PROMPT);
+  const firstTurn = estimateNeurons(GAME_MODEL, promptTokens, 394);
+  const steadyTurn = estimateNeurons(GAME_MODEL, promptTokens + GAME_HISTORY_MAX_EXCHANGES * 174, 394);
+  check('turn 1 ≈ 24 neurons', Math.round(firstTurn), 24);
+  check(`steady turn ≈ 36 neurons (${GAME_HISTORY_MAX_EXCHANGES}-exchange window)`, Math.round(steadyTurn), 36);
 
   check('neuron budget stays inside the 2000–5000 range', GAME_NEURON_DAILY_BUDGET >= 2000 && GAME_NEURON_DAILY_BUDGET <= 5000, true);
   check('neuron budget is the documented 4000', GAME_NEURON_DAILY_BUDGET, 4000);
@@ -226,15 +243,15 @@ section('One gate only: the site-wide daily experience budget');
   let spent = 0;
   for (let n = 1; n <= 100; n += 1) {
     const hist = Math.min(n - 1, GAME_HISTORY_MAX_EXCHANGES) * 174;
-    spent += estimateNeurons(GAME_MODEL, 2213 + hist, 394);
+    spent += estimateNeurons(GAME_MODEL, promptTokens + hist, 394);
   }
-  check('a 100-turn run costs ≈3335 neurons', Math.round(spent), 3335);
+  check('a 100-turn run costs ≈3478 neurons', Math.round(spent), 3478);
   check('a 100-turn run fits in 90% of the daily budget', spent <= GAME_NEURON_DAILY_BUDGET * 0.9, true);
 
   // Token side: a 100-turn run must fit the OpenAI-compatible budget too.
   let tokens = 0;
   for (let n = 1; n <= 100; n += 1) {
-    tokens += 2213 + Math.min(n - 1, GAME_HISTORY_MAX_EXCHANGES) * 174 + 394;
+    tokens += promptTokens + Math.min(n - 1, GAME_HISTORY_MAX_EXCHANGES) * 174 + 394;
   }
   check('a 100-turn run fits the token budget', tokens <= GAME_TOKEN_DAILY_BUDGET, true);
 
@@ -262,12 +279,12 @@ section('Replay window: as much recent history as the model window allows');
   check(
     'budget = window − output − margin − prompt',
     budget,
-    GAME_CONTEXT_TOKENS - GAME_MAX_TOKENS - GAME_HISTORY_SAFETY_TOKENS - estimateTokens(GAME_SYSTEM_PROMPT)
+    GAME_CONTEXT_TOKENS - GAME_MAX_TOKENS - GAME_HISTORY_SAFETY_TOKENS - estimateTokens(GAME_FULL_PROMPT)
   );
 
-  const promptTokens = estimateTokens(GAME_SYSTEM_PROMPT);
-  check('prompt estimate does not undercut 2214', promptTokens >= 2214, true);
-  check('prompt estimate stays within 1.3×', promptTokens <= 2214 * 1.3, true);
+  const contextPromptTokens = estimateTokens(GAME_FULL_PROMPT);
+  check('prompt estimate does not undercut 2214', contextPromptTokens >= 2214, true);
+  check('prompt estimate stays within 1.3×', contextPromptTokens <= 2214 * 1.3, true);
   check('budget fits 100+ exchanges of headroom', budget / 174 > 100, true);
 
   const msg = (role: 'user' | 'assistant', chars: number) => ({ role, content: '字'.repeat(chars) });
@@ -318,6 +335,7 @@ section('Providers: Workers AI by default, OpenAI-compatible on demand');
   check('usage missing → zeros', readTokenUsage({}), { input: 0, output: 0 });
 
   check('openai endpoint is /chat/completions', aiTs.includes("'/chat/completions'"), true);
+  check('temperature is pinned low for consistency', gameTs.includes('temperature: 0.75'), true);
   check('openai key comes from the environment only', codeOnly(aiTs).includes('Bearer ${provider.apiKey}'), true);
   check('no API key literal in server code', /sk-[A-Za-z0-9]{16,}/.test(aiTs), false);
 }

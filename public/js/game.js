@@ -563,7 +563,14 @@ const APIService = {
                                         console.warn('Unparsed SSE tail:', buffer);
                                     }
                                 }
-                                resolve(rawResponse || fullResponse);
+                                // `readStream()` itself resolves with
+                                // undefined, so the outer promise chain can
+                                // never see this text. Record the turn here:
+                                // this is what keeps the replay window
+                                // populated between requests.
+                                const finalText = rawResponse || fullResponse;
+                                resolve(finalText);
+                                recordTurn(choice, finalText);
                                 return;
                             }
 
@@ -628,10 +635,6 @@ const APIService = {
                     }
 
                     return readStream();
-                })
-                .then(response => {
-                    recordTurn(choice, response);
-                    return response;
                 })
                 .catch(error => {
                     console.error('API request failed:', error);

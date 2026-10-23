@@ -45,7 +45,7 @@ import {
   estimateTokens,
   utcDay
 } from './limits.ts';
-import { GAME_SYSTEM_PROMPT } from './prompt.ts';
+import { GAME_FULL_PROMPT } from './prompt.ts';
 import {
   chatCompletion,
   resolveProvider,
@@ -128,7 +128,7 @@ export const sanitizeHistory = (raw: unknown): ChatMessage[] => {
  *
  * = context window − max output − system prompt − safety margin.
  *
- * The system prompt is a fixed cost (≈2200 tokens) and is subtracted first so a
+ * The system prompt is a fixed cost (≈2520 tokens) and is subtracted first so a
  * long input cannot make the upstream drop it — that would destroy both the
  * persona and the output format the frontend depends on.
  */
@@ -136,7 +136,7 @@ export const historyBudgetTokens = (): number =>
   GAME_CONTEXT_TOKENS -
   GAME_MAX_TOKENS -
   GAME_HISTORY_SAFETY_TOKENS -
-  estimateTokens(GAME_SYSTEM_PROMPT);
+  estimateTokens(GAME_FULL_PROMPT);
 
 /**
  * Keep the newest messages that fit, in chronological order.
@@ -171,7 +171,7 @@ export const fitHistory = (messages: ChatMessage[], budgetTokens: number): ChatM
  * verbatim — see the warning in `prompt.ts`.
  */
 export const buildMessages = (history: ChatMessage[], choice: string): ChatMessage[] => [
-  { role: 'system', content: GAME_SYSTEM_PROMPT },
+  { role: 'system', content: GAME_FULL_PROMPT },
   ...history,
   { role: 'user', content: choice }
 ];
@@ -272,7 +272,7 @@ export const playChoice = async (env: GameEnv, ctx: GameRequestContext): Promise
       result = await chatCompletion(env, provider, {
         messages,
         maxTokens: GAME_MAX_TOKENS,
-        temperature: 0.9
+        temperature: 0.75
       });
     }
   } catch (error) {

@@ -102,6 +102,27 @@ export const GAME_SYSTEM_PROMPT = `# 角色规范
    - 渡劫成功：\`✨ 结局：厉飞雨历九重天劫，肉身成圣，成功飞升仙界！\``;
 
 /**
+ * Runtime contract, appended to the persona prompt (not replacing it).
+ *
+ * The 2,929-character persona is kept verbatim: it defines the world and the
+ * output shape, but it does not explicitly forbid the failure modes seen in
+ * play — rewriting the chosen option as a different event, repeating the
+ * just-narrated outcome as the "new" event, or jumping several cultivation
+ * levels in one turn. This addendum is sent as part of the system message;
+ * `GAME_SYSTEM_PROMPT` itself stays untouched and verifiable.
+ */
+export const GAME_RUNTIME_PROMPT = `
+【本轮硬约束 — 必须遵守】
+1. 最后一条 user 消息是本轮唯一有效选择；「✅ 上轮选择结果」必须复述该选项的字母与原文动作，不得改写成另一个选项或另一件事。
+2. 结果只能由该选项直接推导；不得凭空插入玩家没有选择的事件、敌人或机缘。
+3. 「⚡ 新阶段事件」必须是全新事件，禁止重复「✅」中刚描述过的同一事件、结果或句子。
+4. 单轮最多推进一个小层级（如练气3层→4层）；凡人→练气1层必须给出完整机缘与代价，禁止一轮连跳多个小层或跨越大境界。
+5. A/B/C 必须是玩家下一轮可执行的动作，不得包含已经发生的结果；三项互斥，且与「🔥 当前状态」一致。`;
+
+/** The exact system message: verbatim persona + runtime contract. */
+export const GAME_FULL_PROMPT = `${GAME_SYSTEM_PROMPT}\n${GAME_RUNTIME_PROMPT}`;
+
+/**
  * 游戏里展示的开场文案。
  *
  * ⚠️ 前端把它**硬编码**在 `public/js/game.js` 的 `showOpeningScene()` 里
