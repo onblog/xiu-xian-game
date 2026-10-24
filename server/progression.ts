@@ -150,21 +150,63 @@ export const enforceLevel = (text: string, expected: CultivationLevel): string =
 };
 
 /**
- * Remove concrete layer numbers from the prose and options.
+ * Remove concrete layer numbers from the prose and options, and keep the realm
+ * name it mentions consistent with the settled level.
  *
- * The model keeps writing "突破至炼气期中期6层" even when the server has
- * settled on 炼气期后期7层. The status line is authoritative, so strip layer
- * numbers everywhere else: `炼气期中期6层` becomes `炼气期`, and a bare
- * `中期6层` becomes `该境界`. This keeps the prose readable without letting it
- * contradict the status line.
+ * The model keeps writing "突破至炼气期中期6层" even when the server has settled
+ * on 炼气期后期7层 — and, worse, it kept writing "突破至炼气期" every single turn
+ * long after the player had left 炼气 behind. The status line is authoritative,
+ * so the prose is normalized against it:
+ *
+ * - a breakthrough claim in the same realm becomes `修为精进` (nothing was
+ *   broken through this turn);
+ * - a breakthrough claim that really crossed a realm becomes
+ *   `突破至{settled realm}期`;
+ * - any other level mention (`炼气期中期6层`) collapses to the settled realm.
+ *
+ * No layer number ever survives outside `🔥`: it would contradict the status
+ * line, and the frontend parses only the status line.
  */
-export const stripProseLayers = (text: string): string =>
-  text
+const BREAKTHROUGH_RE =
+  /(成功)?(突破至|突破到|突破|晋级为|晋级|进阶至|进阶|晋升至|晋升|升至|踏入|迈入|修至|直达|达至)(炼气|练气|筑基|结丹|元婴|化神|炼虚|合体|大乘|渡劫)(?:期)?(?:前期|中期|后期|大圆满)?\s*\d*\s*层?/g;
+
+const LEVEL_MENTION_RE =
+  /(炼气|练气|筑基|结丹|元婴|化神|炼虚|合体|大乘|渡劫)(?:期)?(?:前期|中期|后期|大圆满)?\s*\d+\s*层/g;
+
+/** Lines whose subject is the player: the result line and the option lines. */
+const isPlayerLine = (line: string): boolean => line.includes('✅') || /^\s*[A-C][.、]/.test(line);
+
+export const stripProseLayers = (
+  text: string,
+  settled?: CultivationLevel | null,
+  previous?: CultivationLevel | null
+): string => {
+  const settledRealm = settled !== null && settled !== undefined && settled.realm !== '凡人' ? settled.realm : null;
+  const target = settledRealm === null ? null : `${settledRealm}期`;
+  const crossed = settledRealm !== null && previous !== null && previous !== undefined && previous.realm !== settledRealm;
+
+  return text
     .split('\n')
     .map((line) => {
       if (line.includes('🔥')) return line; // the status line is authoritative
-      return line
-        .replace(/(炼气|练气|筑基|结丹|元婴|化神|炼虚|合体|大乘|渡劫)(?:期)?(?:前期|中期|后期|大圆满)?\s*\d+\s*层/g, '$1期')
-        .replace(/(?:前期|中期|后期|大圆满)\s*\d+\s*层/g, '该境界');
+
+      // Only the player's own lines are realigned to the settled realm. An
+      // event line may talk about 韩立 breaking through on his own schedule, so
+      // there the realm is kept and merely loses its layer number.
+      if (!isPlayerLine(line)) {
+        return line
+          .replace(LEVEL_MENTION_RE, '$1期')
+          .replace(/(?:前期|中期|后期|大圆满)\s*\d+\s*层/g, '该境界');
+      }
+
+      let out = line.replace(BREAKTHROUGH_RE, (match, success: string | undefined, verb: string) => {
+        if (target === null) return match; // unknown settled level: leave it alone
+        if (!crossed) return '修为精进';
+        return `${success ?? ''}${verb}${target}`;
+      });
+      out = out.replace(LEVEL_MENTION_RE, () => target ?? '该境界');
+      out = out.replace(/(?:前期|中期|后期|大圆满)\s*\d+\s*层/g, '该境界');
+      return out;
     })
     .join('\n');
+};

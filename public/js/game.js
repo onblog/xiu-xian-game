@@ -5,6 +5,9 @@ const gameState = {
     sessionId: generateRandomId(),
     // Recent exchanges replayed with every request (see recordTurn).
     history: [],
+    // Completed turns. The replay window only holds 15 exchanges, so the
+    // 100-turn cap has to be counted here and sent along with each request.
+    turn: 0,
     // Blob URL of the preloaded intro video; null until (or unless) it loads.
     videoUrl: null,
     loaded: false,
@@ -567,6 +570,7 @@ function recordTurn(choice, reply) {
     if (gameState.history.length > MAX_HISTORY_MESSAGES) {
         gameState.history.splice(0, gameState.history.length - MAX_HISTORY_MESSAGES);
     }
+    gameState.turn += 1;
 }
 
 // API client.
@@ -593,7 +597,8 @@ const APIService = {
                 body: JSON.stringify({
                     sessionId: gameState.sessionId,
                     choice: choice,
-                    history: history
+                    history: history,
+                    turn: gameState.turn
                 })
             })
                 .then(async response => {

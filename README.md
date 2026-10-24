@@ -174,8 +174,8 @@ The only cost control in the project. It is **site-wide**, not per visitor:
 
 | Provider | Daily budget | Why this number |
 | --- | --- | --- |
-| Workers AI | **4,000 neurons** | a 100-turn run costs ≈3,657 neurons with a 15-exchange window, leaving ~16 turns of headroom out of a 10,000/day free account allowance |
-| OpenAI-compatible | **600,000 tokens** | a 100-turn run is ≈501k tokens; the rest is slack for longer replies |
+| Workers AI | **4,000 neurons** | a full ≈55-turn run costs ≈2,571 neurons with a 15-exchange window, leaving headroom out of a 10,000/day free account allowance |
+| OpenAI-compatible | **600,000 tokens** | a full run is ≈435k tokens; the rest is slack for longer replies |
 
 A request is rejected with HTTP 503 and a readable message once the day's budget
 is used up; the ledger expires on its own after seven days. The unit follows the
@@ -187,14 +187,28 @@ provider, so switching models mid-day does not corrupt the counter.
 > hard cap, replace `server/quota.ts` with a Durable Object.
 
 Why 15 exchanges: every turn re-reads the replay window, so the window is the
-cost knob. At 15 exchanges a steady-state turn costs ≈36 neurons; the full
-100-turn arc still fits in one day's budget.
+cost knob. At 15 exchanges a steady-state turn costs ≈48 neurons; a complete run
+still fits in one day's budget.
+
+## Story arc and world
+
+The world is **data**, not prose: `server/world.ts` holds the geography, the
+realm → region gate, the mandatory cast and the chapter list, and the same
+tables build both the system-prompt bible and the per-turn director block. Two
+consequences worth knowing:
+
+- **A realm can only be in its own regions.** 灵界 opens at 化神 and is then
+  mandatory — the story cannot wander there early, nor linger in the human realm
+  after 化神.
+- **The run has a finish line.** +2 layers per turn reaches 渡劫期大圆满 in 54
+  turns; turn 55 is the ascension finale and offers no further choice. A hard
+  cap at `GAME_MAX_TURNS = 100` is the safety net, not the intended length.
 
 ## API
 
 | Method | Path | Body | Response |
 | --- | --- | --- | --- |
-| `POST` | `/api/chat` | `{ sessionId?, choice, history? }` | SSE `data: {"text":"…","done":true}` |
+| `POST` | `/api/chat` | `{ sessionId?, choice, history?, turn? }` | SSE `data: {"text":"…","done":true}` |
 | `GET` | `/api/health` | — | provider, model and quota snapshot |
 
 Errors use one envelope:

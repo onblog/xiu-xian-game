@@ -27,11 +27,18 @@
  * full completion exists — the same perceived latency as a real stream's first
  * token.
  *
- * ## Numbers stay with the model
+ * ## The server directs, the model narrates
  *
- * Age, lifespan and cultivation stage are computed by the model from the
- * prompt, exactly as the original agent did. Moving them into a code state
- * machine was tried and rejected: the narrative stopped advancing coherently.
+ * Since the last rewrite the server owns four things the model used to drift
+ * on, and passes each as a sentence in the system message:
+ *
+ * - the cultivation level (`progression.ts`),
+ * - the map lock and chapter (`world.ts` → `directorInstruction`),
+ * - the mandatory cast that is overdue this turn,
+ * - the turn budget and the finale (`GAME_MAX_TURNS`).
+ *
+ * Age and lifespan stay with the model: a code state machine for those was
+ * tried and rejected, because the narrative stopped advancing coherently.
  */
 
 import {
@@ -46,6 +53,7 @@ import {
   utcDay
 } from './limits.ts';
 import { GAME_FULL_PROMPT } from './prompt.ts';
+import { GAME_MAX_TURNS, directorInstruction, isFinaleTurn } from './world.ts';
 import {
   enforceLevel,
   levelInstruction,
@@ -85,6 +93,15 @@ export interface GameRequestContext {
   choice: string;
   /** Untrusted replay window from the browser. */
   history: unknown;
+  /**
+   * How many turns the browser has completed, used only for the 100-turn cap.
+   *
+   * The replay window is 15 exchanges, so the server cannot count turns by
+   * itself. A forged value can only lengthen that player's own story — it never
+   * touches the budget — and the level path still ends the run naturally at
+   * ≈55 turns.
+   */
+  turn?: unknown;
 }
 
 /** Handler result. Failures carry a player-facing message plus a log-only detail. */
@@ -105,6 +122,48 @@ export type GameOutcome =
  * From prompt rule 6: the opening is `是`, after that only a bare A/B/C.
  */
 export const isValidChoice = (choice: string): boolean => choice === '是' || /^[ABC]$/i.test(choice);
+
+/**
+ * Normalize the client-supplied turn counter.
+ *
+ * Never rejects and never trusts it blindly: the replayed assistant count is a
+ * floor, so dropping messages cannot rewind the run below what the window
+ * proves.
+ */
+export const sanitizeTurn = (raw: unknown, history: ChatMessage[]): number => {
+  const assistantCount = history.filter((message) => message.role === 'assistant').length;
+  const claimed = Number(raw);
+  const client = Number.isFinite(claimed) && claimed > 0 ? Math.floor(claimed) : 0;
+  return Math.min(Math.max(client, assistantCount), GAME_MAX_TURNS + 20);
+};
+
+/** Text that marks the story as finished. */
+export const ENDING_MARKERS = ['✨ 结局', '💀 结局'] as const;
+
+/** Whether a reply closed the run. */
+export const isEndingText = (text: string): boolean => ENDING_MARKERS.some((marker) => text.includes(marker));
+
+/**
+ * Close the story for real.
+ *
+ * The finale turn must not offer another choice, or the frontend renders A/B/C
+ * buttons and the run continues past the ending. So the choice block is cut
+ * here (the browser splits on `📌`) and — if the model forgot the ending line —
+ * one authoritative ending is appended.
+ */
+export const finalizeEnding = (text: string): string => {
+  const marker = text.indexOf('📌');
+  let out = marker >= 0 ? text.slice(0, marker) : text;
+  out = out
+    .split('\n')
+    .filter((line) => !/^[A-C][.、]/.test(line.trim()))
+    .join('\n')
+    .trimEnd();
+  if (!out.includes('✨ 结局')) {
+    out += '\n✨ 结局：厉飞雨渡九重天劫，飞升仙界，全剧终！';
+  }
+  return out;
+};
 
 /**
  * Normalize a client-supplied history array.
@@ -275,9 +334,22 @@ export const playChoice = async (env: GameEnv, ctx: GameRequestContext): Promise
   const lastAssistant = [...history].reverse().find((message) => message.role === 'assistant');
   const previousLevel: CultivationLevel | null = lastAssistant === undefined ? null : parseLevel(lastAssistant.content);
   const settledLevel: CultivationLevel | null = history.length === 0 ? null : nextLevel(previousLevel);
-  const systemPrompt =
-    settledLevel === null ? GAME_FULL_PROMPT : `${GAME_FULL_PROMPT}${levelInstruction(previousLevel, settledLevel)}`;
-  const messages = buildMessages(history, ctx.choice, systemPrompt);
+
+  // Turn budget: the browser counts the turns (the replay window is too short),
+  // and the finale fires either on the level path or on the hard cap.
+  const turn = sanitizeTurn(ctx.turn, history);
+  const turnNumber = Math.min(turn + 1, GAME_MAX_TURNS);
+  const finale = settledLevel !== null && isFinaleTurn(previousLevel, turnNumber);
+
+  // One instruction block per turn: the settled level, the map lock, the
+  // overdue cast and (on the last turn) the closing rules.
+  const historyText = history
+    .filter((message) => message.role === 'assistant')
+    .map((message) => message.content)
+    .join('\n');
+  const director = directorInstruction(settledLevel ?? { realm: '凡人', layer: 0 }, historyText, turnNumber, finale);
+  const levelNote = settledLevel === null ? '' : levelInstruction(previousLevel, settledLevel);
+  const messages = buildMessages(history, ctx.choice, `${GAME_FULL_PROMPT}${levelNote}${director}`);
 
   let result: ChatResult;
   try {
@@ -319,7 +391,11 @@ export const playChoice = async (env: GameEnv, ctx: GameRequestContext): Promise
   if (settledLevel !== null) {
     result.text = enforceLevel(result.text, settledLevel);
   }
-  result.text = stripProseLayers(result.text);
+  result.text = stripProseLayers(result.text, settledLevel, previousLevel);
+  if (finale) {
+    // The story is over: no choice block may survive.
+    result.text = finalizeEnding(result.text);
+  }
 
   const state = await addQuota(env.QUOTA, unit, day, costOf(provider, result), false);
   return {

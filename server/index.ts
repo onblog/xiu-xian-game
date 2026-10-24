@@ -92,7 +92,7 @@ const SESSION_ID_RE = /^[a-z0-9]{8,64}$/i;
 /**
  * `POST /api/chat` — the player takes one step.
  *
- * Body: `{ sessionId?, choice, history? }`.
+ * Body: `{ sessionId?, choice, history?, turn? }`.
  * Success: SSE. Rejected by the budget, by the provider, or by validation:
  * a JSON envelope `{ ok:false, error:{ code, message } }` that the frontend
  * prints in the story area (see `showRetry` in `public/js/game.js`).
@@ -129,7 +129,7 @@ const handleChat = async (request: Request, env: Env, url: URL): Promise<Respons
   const session = SESSION_ID_RE.test(rawSession) ? rawSession.slice(0, 8) : 'unknown';
   const ip = maskIp(clientIp(request));
 
-  const result = await playChoice(env, { choice, history: payload.history });
+  const result = await playChoice(env, { choice, history: payload.history, turn: payload.turn });
 
   if (!result.ok) {
     const level = result.status >= 500 ? 'error' : 'warn';

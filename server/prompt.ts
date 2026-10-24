@@ -22,6 +22,11 @@
  * - 联网搜索、长期记忆：平台上都未开启，无需迁移。
  */
 
+import { GAME_WORLD_PROMPT } from './world.ts';
+
+/** Re-exported so callers can assert on the bible without a second import. */
+export { GAME_WORLD_PROMPT };
+
 /**
  * 系统提示词（原文 2929 字符）。
  *
@@ -102,6 +107,14 @@ export const GAME_SYSTEM_PROMPT = `# 角色规范
    - 渡劫成功：\`✨ 结局：厉飞雨历九重天劫，肉身成圣，成功飞升仙界！\``;
 
 /**
+ * The world bible lives in `world.ts` rather than here because the same tables
+ * drive the per-turn director instruction in `game.ts` — geography, realm gates
+ * and the mandatory cast must never be able to drift apart from what the model
+ * is told every turn. Composition order below: persona → bible → runtime
+ * contract, so the verbatim persona still sits at `messages[0]`'s head.
+ */
+
+/**
  * Runtime contract, appended to the persona prompt (not replacing it).
  *
  * The 2,929-character persona is kept verbatim: it defines the world and the
@@ -119,10 +132,12 @@ export const GAME_RUNTIME_PROMPT = `
 4. 境界层级（硬性）：每个大境界固定 10 层——前期 1-3 层、中期 4-6 层、后期 7-9 层、大圆满 10 层；升级必须按「前期→中期→后期→大圆满→下一境界前期1层」的顺序逐层推进，禁止前期跳后期、后期跳下一境界、出现 11 层及以上；「🔥 当前状态」必须写成「练气期中期5层」「筑基期前期1层」这种「境界+阶段+层数」格式。
 5. 升级节奏（硬性）：每轮必须推进时间并结算修为，至少提升 1、最多提升 3 层；从大圆满突破到下一境界时，本轮只能到新境界前期1层，不得再叠加；不得以打探、对话、休息、时间不够、受伤或战败为由原地踏步——即使重伤/战败，也要写成「重伤中悟道、服丹、残篇共鸣」等合理突破。
 6. 人物关系：厉飞雨为男性；道侣/双修/情感线只能与女性角色（如南宫婉）展开，严禁与韩立或其他男性角色结为道侣，韩立只能作为同门/挚友/盟友。
-7. 「结丹」是境界名（结丹期），不是关系动词；禁止「与韩立结丹」「与韩立结为道侣」这类搭配。A/B/C 必须是玩家下一轮可执行的具体行动，不得包含已发生的结果，不得把境界名当动词，不得生造原著没有的关系或名词。正文与 A/B/C 选项禁止写「第N层」「中期N层」等具体层数，层级只在「🔥 当前状态」出现。`;
+7. 「结丹」是境界名（结丹期），不是关系动词；禁止「与韩立结丹」「与韩立结为道侣」这类搭配。A/B/C 必须是玩家下一轮可执行的具体行动，不得包含已发生的结果，不得把境界名当动词，不得生造原著没有的关系或名词。正文与 A/B/C 选项禁止写「第N层」「中期N层」等具体层数，层级只在「🔥 当前状态」出现。
+8. 境界一致性（硬性）：「✅ 上轮选择结果」里提到的境界必须与本轮「🔥 当前状态」的末尾完全一致。本轮没有跨大境界时禁止写「突破至X期」，改写「修为精进」；只有本轮真的跨越了大境界，才写「突破至{新境界}期」。禁止把「炼气期」当成固定口头禅每一轮重复。
+9. 地图与章节（硬性）：必须服从服务端导演指令中的地图锁与主线章节。一轮之内只能处在当前境界允许的地点，不得跳图、不得凭空更换大陆、不得提前进入灵界；地点变化必须写出移动过程。`;
 
-/** The exact system message: verbatim persona + runtime contract. */
-export const GAME_FULL_PROMPT = `${GAME_SYSTEM_PROMPT}\n${GAME_RUNTIME_PROMPT}`;
+/** The exact system message: verbatim persona + world bible + runtime contract. */
+export const GAME_FULL_PROMPT = `${GAME_SYSTEM_PROMPT}\n${GAME_WORLD_PROMPT}\n${GAME_RUNTIME_PROMPT}`;
 
 /**
  * 游戏里展示的开场文案。

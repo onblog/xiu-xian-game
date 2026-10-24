@@ -10,7 +10,9 @@
  * 4. **The only gate is the daily budget** — no per-IP / per-minute limits, no
  *    database.
  * 5. **Budget conversion uses the model's own neuron rate**, and a full
- *    100-turn run still fits in one day.
+ *    ≈55-turn run (the level path's natural ending) still fits in one day.
+ * 5b. **The world is data**: geography, realm gates, mandatory cast, chapter
+ *    arc and the 100-turn hard cap are asserted, not remembered.
  * 6. **Either provider resolves correctly**, and no secret is baked in.
  * 7. **Assets referenced by the page exist** — a missing WebP is a white screen,
  *    not a build error.
@@ -37,18 +39,35 @@ import {
   GAME_FULL_PROMPT,
   GAME_OPENING_TEXT,
   GAME_RUNTIME_PROMPT,
-  GAME_SYSTEM_PROMPT
+  GAME_SYSTEM_PROMPT,
+  GAME_WORLD_PROMPT
 } from '../server/prompt.ts';
 import {
+  ENDING_MARKERS,
   buildMessages,
+  finalizeEnding,
   fitHistory,
   historyBudgetTokens,
+  isEndingText,
   isValidChoice,
   sanitizeHistory,
+  sanitizeTurn,
   sseBody
 } from '../server/game.ts';
+import {
+  ARC_BY_REALM,
+  GAME_MAX_TURNS,
+  MANDATORY_CAST,
+  REALM_REGIONS,
+  arcFor,
+  directorInstruction,
+  isFinaleTurn,
+  overdueCast,
+  regionFor
+} from '../server/world.ts';
 import { extractText, readTokenUsage, resolveProvider } from '../server/ai.ts';
 import {
+  REALMS,
   enforceLevel,
   formatLevel,
   levelInstruction,
@@ -120,6 +139,52 @@ section('The persona prompt is the original, verbatim (2929 characters)');
   check('runtime contract requires progress every turn', GAME_RUNTIME_PROMPT.includes('至少提升 1、最多提升 3 层'), true);
   check('runtime contract forbids male romance', GAME_RUNTIME_PROMPT.includes('严禁与韩立或其他男性角色结为道侣'), true);
   check('runtime contract separates 结丹 from relationships', GAME_RUNTIME_PROMPT.includes('「结丹」是境界名'), true);
+  check('runtime contract pins the realm in the result line', GAME_RUNTIME_PROMPT.includes('境界一致性（硬性）'), true);
+  check('runtime contract forbids the 炼气 mantra', GAME_RUNTIME_PROMPT.includes('禁止把「炼气期」当成固定口头禅'), true);
+  check('runtime contract defers to the map lock', GAME_RUNTIME_PROMPT.includes('必须服从服务端导演指令中的地图锁'), true);
+}
+
+section('World bible: fixed geography, realm gates, cast and finish line');
+{
+  // Composition order: verbatim persona → bible → runtime contract.
+  const personaAt = GAME_FULL_PROMPT.indexOf('# 角色规范');
+  const bibleAt = GAME_FULL_PROMPT.indexOf('# 世界观硬设定');
+  const runtimeAt = GAME_FULL_PROMPT.indexOf('【本轮硬约束');
+  check('persona comes first in the system message', personaAt, 0);
+  check('bible sits between persona and runtime', bibleAt > personaAt && bibleAt < runtimeAt, true);
+  check('bible is part of the full prompt', GAME_FULL_PROMPT.includes(GAME_WORLD_PROMPT), true);
+
+  // Geography: every region the story needs is named, so the model cannot invent one.
+  for (const place of [
+    '七玄门', '黄枫谷', '掩月宗', '溪国', '落云宗', '乱星海', '星宫', '大晋', '昆吾山',
+    '阴冥之地', '天渊城', '风元大陆', '地渊', '雷鸣大陆', '血天大陆', '紫薇海', '蛮荒界域', '飞升台', '仙界'
+  ]) {
+    check(`geography names ${place}`, GAME_WORLD_PROMPT.includes(place), true);
+  }
+
+  // The one gate that must never leak: 灵界 before 化神.
+  check('the human realm ends at 化神', REALM_REGIONS.化神.gate.includes('必须动身'), true);
+  check('元婴 cannot reach 灵界', JSON.stringify(REALM_REGIONS.元婴.places).includes('天渊城'), false);
+  check('炼气 cannot reach 乱星海', JSON.stringify(REALM_REGIONS.炼气.places).includes('星宫'), false);
+  check('bible forbids 灵界 below 化神', GAME_WORLD_PROMPT.includes('元婴期及以下严禁亲身抵达灵界'), true);
+  check('bible forces the crossing at 化神', GAME_WORLD_PROMPT.includes('化神中期起动身'), true);
+  check('bible forbids returning after ascension', GAME_WORLD_PROMPT.includes('不得返回任何下界地图'), true);
+  check('every realm has a row', REALMS.every((realm) => REALM_REGIONS[realm] !== undefined), true);
+  check('every realm has a chapter', REALMS.every((realm) => ARC_BY_REALM[realm].chapter.length > 0), true);
+
+  // Cast: every mandated character is written into the prompt.
+  for (const member of MANDATORY_CAST) {
+    check(`bible names ${member.name}`, GAME_WORLD_PROMPT.includes(member.name), true);
+  }
+  check('bible names 南宫婉 as the only partner', GAME_WORLD_PROMPT.includes('南宫婉是厉飞雨唯一道侣'), true);
+  check('bible keeps 韩立 free of romance', GAME_WORLD_PROMPT.includes('不得给韩立安排道侣'), true);
+  check('cast has a deadline for each member', MANDATORY_CAST.every((m) => m.deadline in REALM_REGIONS), true);
+  check('cast count covers the originals', MANDATORY_CAST.length >= 14, true);
+
+  // Finish line.
+  check('hard cap is 100 turns', GAME_MAX_TURNS, 100);
+  check('bible states the hard cap', GAME_WORLD_PROMPT.includes('硬上限 100 轮'), true);
+  check('bible ends with ascension', GAME_WORLD_PROMPT.includes('飞升仙界，全剧终'), true);
 }
 
 section('Opening line: frontend constant and server constant agree');
@@ -161,6 +226,8 @@ section('Frontend: stateless backend, browser-owned history, no fingerprint');
   check('does not rely on the undefined chain value', gameJs.includes('recordTurn(choice, response)'), false);
   check('reads the clean SSE payload', gameJs.includes('jsonData.text') && gameJs.includes('jsonData.done'), true);
   check('history cap mirrors the server (30 messages)', /MAX_HISTORY_MESSAGES = 30/.test(gameJs), true);
+  check('browser counts turns for the 100-turn cap', /turn: 0/.test(gameJs) && gameJs.includes('gameState.turn += 1'), true);
+  check('turn counter is sent with each request', gameJs.includes('turn: gameState.turn'), true);
   check('timeout allows a slow provider (60s)', gameJs.includes('60000'), true);
 
   // Mobile autoplay: the intro video must never be able to cover the page forever.
@@ -227,6 +294,17 @@ section('Request validation and replay trimming');
   check('client array trimmed to 2 × max exchanges', windowed.length, GAME_HISTORY_MAX_EXCHANGES * 2);
   check('newest message survives', windowed[windowed.length - 1]!.content, 'm99');
 
+  const historyPair = [
+    { role: 'user' as const, content: '是' },
+    { role: 'assistant' as const, content: '✅ …' }
+  ];
+  check('turn defaults to the replayed count', sanitizeTurn(undefined, historyPair), 1);
+  check('turn is accepted from the client', sanitizeTurn(42, historyPair), 42);
+  check('a dropped window cannot rewind the run', sanitizeTurn(0, [...historyPair, ...historyPair]), 2);
+  check('garbage turn falls back to the window', sanitizeTurn('nope', historyPair), 1);
+  check('turn is clamped above the cap', sanitizeTurn(99999, []), GAME_MAX_TURNS + 20);
+  check('index.ts forwards the turn counter', indexTs.includes('turn: payload.turn'), true);
+
   const msgs = buildMessages([{ role: 'user', content: '是' }, { role: 'assistant', content: '✅ …' }], 'A');
   check('1 system + 2 history + 1 current', msgs.length, 4);
   check('messages[0] is persona + runtime contract', msgs[0]!.content.length, GAME_FULL_PROMPT.length);
@@ -243,39 +321,58 @@ section('One gate only: the site-wide daily experience budget');
   check('the default model has a registered rate', qwen !== undefined, true);
   check('output costs 6.6× input', Math.round((qwen!.output / qwen!.input) * 10) / 10, 6.6);
 
-  // Measured: persona + runtime contract ≈2522 tokens, each reply ≈174 tokens,
-  // each output ≈394 tokens.
-  const directorTokens = estimateTokens(levelInstruction({ realm: '炼气', layer: 1 }, { realm: '炼气', layer: 3 }));
+  // Measured: persona + bible + runtime contract ≈4,930 tokens, the per-turn
+  // director block ≈341 tokens, each reply ≈174 tokens, each output ≈394 tokens.
+  const directorTokens = estimateTokens(
+    levelInstruction({ realm: '炼气', layer: 1 }, { realm: '炼气', layer: 3 }) +
+      directorInstruction({ realm: '炼气', layer: 3 }, '', 2, false)
+  );
   const promptTokens = estimateTokens(GAME_FULL_PROMPT) + directorTokens;
   const firstTurn = estimateNeurons(GAME_MODEL, promptTokens, 394);
   const steadyTurn = estimateNeurons(GAME_MODEL, promptTokens + GAME_HISTORY_MAX_EXCHANGES * 174, 394);
-  check('turn 1 ≈ 25 neurons', Math.round(firstTurn), 25);
-  check(`steady turn ≈ 38 neurons (${GAME_HISTORY_MAX_EXCHANGES}-exchange window)`, Math.round(steadyTurn), 38);
+  check('turn 1 ≈ 36 neurons', Math.round(firstTurn), 36);
+  check(`steady turn ≈ 49 neurons (${GAME_HISTORY_MAX_EXCHANGES}-exchange window)`, Math.round(steadyTurn), 48);
 
   check('neuron budget stays inside the 2000–5000 range', GAME_NEURON_DAILY_BUDGET >= 2000 && GAME_NEURON_DAILY_BUDGET <= 5000, true);
   check('neuron budget is the documented 4000', GAME_NEURON_DAILY_BUDGET, 4000);
   check('token budget is the documented 600000', GAME_TOKEN_DAILY_BUDGET, 600_000);
   check('budget unit mapping', [dailyBudgetFor('neurons'), dailyBudgetFor('tokens')], [4000, 600_000]);
-  check('quota key shape', quotaKey('neurons', '2026-01-02'), 'quota:neurons:2026-01-02');
+  check('quota key shape (shared namespace, project prefix)', quotaKey('neurons', '2026-01-02'), 'xiuxian:quota:neurons:2026-01-02');
 
   /*
-   * Design guarantee: a 100-turn run fits in one day's budget.
-   * Accumulate the measured per-turn cost under the replay cap.
+   * Design guarantee: a *complete* run fits in one day's budget.
+   *
+   * The run is now bounded by the level path: 54 turns to 渡劫期大圆满10层,
+   * then the finale turn. Simulate that path with the measured per-turn cost.
    */
+  let level: ReturnType<typeof nextLevel> | null = null;
+  let runTurns = 0;
+  for (;;) {
+    level = nextLevel(level);
+    runTurns += 1;
+    if (level.realm === '渡劫' && level.layer === 10) break;
+  }
+  const finaleTurn = runTurns + 1;
+  check('a run reaches 渡劫 in 54 turns', runTurns, 54);
+  check('the finale turn is 55', finaleTurn, 55);
+  check('the run ends well before the hard cap', finaleTurn < GAME_MAX_TURNS, true);
+
   let spent = 0;
-  for (let n = 1; n <= 100; n += 1) {
+  for (let n = 1; n <= finaleTurn; n += 1) {
     const hist = Math.min(n - 1, GAME_HISTORY_MAX_EXCHANGES) * 174;
     spent += estimateNeurons(GAME_MODEL, promptTokens + hist, 394);
   }
-  check('a 100-turn run costs ≈3657 neurons', Math.round(spent), 3657);
-  check('a 100-turn run fits in 92% of the daily budget', spent <= GAME_NEURON_DAILY_BUDGET * 0.92, true);
+  check('a full run costs ≈2571 neurons', Math.round(spent), 2571);
+  check('a full run fits in 65% of the daily budget', spent <= GAME_NEURON_DAILY_BUDGET * 0.65, true);
 
-  // Token side: a 100-turn run must fit the OpenAI-compatible budget too.
+  // Token side: a full run must fit the OpenAI-compatible budget too.
   let tokens = 0;
-  for (let n = 1; n <= 100; n += 1) {
+  for (let n = 1; n <= finaleTurn; n += 1) {
     tokens += promptTokens + Math.min(n - 1, GAME_HISTORY_MAX_EXCHANGES) * 174 + 394;
   }
-  check('a 100-turn run fits the token budget', tokens <= GAME_TOKEN_DAILY_BUDGET, true);
+  check('a full run costs ≈435k tokens', Math.round(tokens / 1000) * 1000, 435_000);
+  check('a full run fits the token budget', tokens <= GAME_TOKEN_DAILY_BUDGET, true);
+  check('a full run leaves headroom for longer replies', tokens <= GAME_TOKEN_DAILY_BUDGET * 0.8, true);
 
   /*
    * The absence of per-IP / per-minute limits is asserted, not remembered.
@@ -306,7 +403,9 @@ section('Replay window: as much recent history as the model window allows');
 
   const contextPromptTokens = estimateTokens(GAME_FULL_PROMPT);
   check('prompt estimate does not undercut 2214', contextPromptTokens >= 2214, true);
-  check('prompt estimate stays within 1.3×', contextPromptTokens <= 2214 * 1.3, true);
+  // Persona 2929 + bible 2312 characters measured ≈4,930 tokens.
+  check('prompt estimate stays under 5,200 tokens', contextPromptTokens <= 5200, true);
+  check('the bible costs less than the persona', estimateTokens(GAME_WORLD_PROMPT) < contextPromptTokens / 2, true);
   check('budget fits 100+ exchanges of headroom', budget / 174 > 100, true);
 
   const msg = (role: 'user' | 'assistant', chars: number) => ({ role, content: '字'.repeat(chars) });
@@ -402,10 +501,77 @@ section('Progression: server-owned levels, 1–10 with strict stage order');
 
   check('game.ts computes the next level', gameTs.includes('nextLevel(previousLevel)'), true);
   check('game.ts enforces the status line', gameTs.includes('enforceLevel(result.text, settledLevel)'), true);
-  const stripped = stripProseLayers('✅ 突破至炼气期中期6层\n🔥 当前状态：厉飞雨 | 17岁 | 剩余寿元83年 | 炼气期后期7层\nA. 以中期6层之力强攻');
-  check('prose loses concrete layers', stripped.includes('突破至炼气期') && stripped.includes('以该境界之力'), true);
-  check('status line keeps the settled layer', stripped.includes('炼气期后期7层'), true);
-  check('game.ts strips prose layers', gameTs.includes('stripProseLayers(result.text)'), true);
+  // The original bug: every turn read "突破至炼气期" even at 筑基/结丹, because
+  // the layer text was stripped but the realm name was left as written.
+  const sameRealm = stripProseLayers(
+    '✅ 选择A，随韩立寻凝气花，突破至炼气期中期6层，寿元增至150年\n🔥 当前状态：厉飞雨 | 27岁 | 剩余寿元149年 | 炼气期后期7层\nA. 以中期6层之力强攻',
+    { realm: '炼气', layer: 7 },
+    { realm: '炼气', layer: 5 }
+  );
+  check('no false breakthrough inside a realm', sameRealm.includes('修为精进'), true);
+  check('no stale 突破至炼气期', sameRealm.includes('突破至炼气期'), false);
+  check('no concrete layer in prose', /中期6层/.test(sameRealm), false);
+  check('options lose concrete layers', sameRealm.includes('以该境界之力'), true);
+  check('status line keeps the settled layer', sameRealm.includes('炼气期后期7层'), true);
+
+  const crossedRealm = stripProseLayers(
+    '✅ 选择C，苦修破境，突破至炼气期大圆满10层\n🔥 当前状态：厉飞雨 | 40岁 | 剩余寿元180年 | 筑基期前期1层',
+    { realm: '筑基', layer: 1 },
+    { realm: '炼气', layer: 10 }
+  );
+  check('a real realm crossing is rewritten', crossedRealm.includes('突破至筑基期'), true);
+  check('the old realm does not survive', crossedRealm.includes('突破至炼气期'), false);
+
+  const unknown = stripProseLayers('你仍在炼气期中期6层苦修');
+  check('an event line keeps its own realm', unknown, '你仍在炼气期苦修');
+
+  const eventLine = stripProseLayers('⚡ 韩立那边传来消息，他已突破至筑基期中期4层', { realm: '炼气', layer: 7 }, { realm: '炼气', layer: 5 });
+  check('an event line is not realigned to the player realm', eventLine.includes('突破至筑基期'), true);
+  check('an event line loses its layer number', /中期4层/.test(eventLine), false);
+
+  check('game.ts strips prose layers against the settled level', gameTs.includes('stripProseLayers(result.text, settledLevel, previousLevel)'), true);
+}
+
+section('Director: map lock, cast roll-call, finale');
+{
+  check('凡人 starts in 七玄门', regionFor(null).places.includes('七玄门'), true);
+  check('炼气 moves to 黄枫谷', regionFor({ realm: '炼气', layer: 3 }).places.includes('黄枫谷'), true);
+  check('炼气 has no 灵界', regionFor({ realm: '炼气', layer: 3 }).places.some((p) => p.includes('天渊城')), false);
+  check('化神 must reach 天渊城', regionFor({ realm: '化神', layer: 5 }).places.includes('天渊城'), true);
+  check('渡劫 is on the ascension platform', regionFor({ realm: '渡劫', layer: 10 }).places.includes('飞升台'), true);
+  check('chapter follows the realm', arcFor({ realm: '化神', layer: 1 }).chapter, '第六章 初入灵界');
+
+  const early = directorInstruction({ realm: '炼气', layer: 4 }, '', 3, false);
+  check('director states the turn budget', early.includes('第 3 / 100 轮'), true);
+  check('director carries the map lock', early.includes('地图锁'), true);
+  check('director forbids 灵界 before 化神', early.includes('化神期之前严禁亲身抵达灵界'), true);
+  check('director names 韩立 as always present', early.includes('韩立始终在场'), true);
+
+  const overdue = overdueCast('', { realm: '炼气', layer: 4 });
+  const overdueNames = overdue.map((m) => m.name);
+  check('炼气 summons 墨大夫 and 南宫婉', [overdueNames.includes('墨大夫'), overdueNames.includes('南宫婉')], [true, true]);
+  check('炼气 does not summon 紫灵仙子 yet', overdueNames.includes('紫灵仙子'), false);
+  check('appearance removes the summons', overdueCast('南宫婉与你对视', { realm: '炼气', layer: 4 }).map((m) => m.name).includes('南宫婉'), false);
+  check('one-realm slack recovers a miss', overdueCast('', { realm: '筑基', layer: 2 }).map((m) => m.name).includes('墨大夫'), true);
+  check('no summons long after the deadline', overdueCast('', { realm: '结丹', layer: 2 }).map((m) => m.name).includes('墨大夫'), false);
+  check('the instruction lists the overdue cast', directorInstruction({ realm: '炼气', layer: 4 }, '', 3, false).includes('必须登场'), true);
+
+  check('finale on 渡劫大圆满', isFinaleTurn({ realm: '渡劫', layer: 10 }, 55), true);
+  check('finale on the hard cap', isFinaleTurn({ realm: '炼气', layer: 1 }, GAME_MAX_TURNS), true);
+  check('no finale mid-run', isFinaleTurn({ realm: '炼气', layer: 1 }, 5), false);
+
+  const finaleText = directorInstruction({ realm: '渡劫', layer: 10 }, '', 55, true);
+  check('finale forbids the choice block', finaleText.includes('严禁输出「📌 请选择：」'), true);
+  check('finale demands the ending line', finaleText.includes('✨ 结局'), true);
+
+  const closed = finalizeEnding('⚡ 新阶段事件：天劫落下\n📌 请选择：\nA. 硬扛\nB. 闪避\nC. 求援');
+  check('finalize cuts the choice block', closed.includes('📌'), false);
+  check('finalize drops A/B/C lines', /^[A-C]\./m.test(closed), false);
+  check('finalize appends the missing ending', closed.includes('✨ 结局'), true);
+  check('ending text is recognized', isEndingText(closed), true);
+  check('a normal turn is not an ending', isEndingText('✅ 选择A\n📌 请选择：'), false);
+  check('both ending markers are covered', ENDING_MARKERS.length, 2);
+  check('game.ts finalizes the last turn', gameTs.includes('finalizeEnding(result.text)'), true);
 }
 
 /* --- 8. Assets ------------------------------------------------------------ */
@@ -434,9 +600,11 @@ section('Asset references resolve (a missing WebP is a white screen)');
 section('Worker config: game at the domain root, API under /api');
 {
   check('worker name', /name = "xiu-xian-game"/.test(wrangler), true);
-  check('custom domain', /pattern = "xiuxian\.wordtk\.com"/.test(wrangler), true);
-  check('custom_domain enabled', /custom_domain = true/.test(wrangler), true);
+  // The domain binding lives in the Cloudflare dashboard, deliberately not in
+  // the repo: a committed hostname is a stale hostname. Only the workers.dev
+  // switch is code.
   check('workers.dev disabled', /workers_dev = false/.test(wrangler), true);
+  check('no domain literal in the Worker config', /pattern = "/.test(wrangler), false);
   check('static assets directory', wrangler.includes('directory = "./public"'), true);
   check('only /api reaches the Worker', wrangler.includes('run_worker_first = ["/api/*", "/api"]'), true);
   check('KV binding is QUOTA', /binding = "QUOTA"/.test(wrangler) && /id = "[a-f0-9]{32}"/.test(wrangler), true);
@@ -484,7 +652,7 @@ section('Publishable repository: license, bilingual README, screenshots, no pers
   check('.gitignore ignores .wrangler/', readTextIfExists('.gitignore').includes('.wrangler/'), true);
   check('no placeholder author email', /example@github\.com|example@example/.test(readme), false);
   check('no stale D1 id', wrangler.includes('c8c766f7'), false);
-  check('the public site is the only domain in the config', (wrangler.match(/pattern = "/g) ?? []).length, 1);
+  check('no domain literal anywhere in the config', (wrangler.match(/pattern = "/g) ?? []).length, 0);
 }
 
 console.log(`\n${failures === 0 ? 'all checks passed' : `${failures} check(s) failed`}`);

@@ -20,18 +20,20 @@
  * ## Why the Cloudflare budget is 4000 neurons
  *
  * A free Workers AI account gets 10,000 neurons/day, shared by every Worker on
- * that account. This game takes 4000 of it: a full 100-turn run costs ≈3657
- * neurons with a 15-exchange replay window, so one player can finish a
- * playthrough in a day and there is still headroom for a few more turns.
- * The remaining 6000 neurons stay available to the account owner's other
- * Workers.
+ * that account. This game takes 4000 of it: a full run is ≈55 turns (the level
+ * path ends at 渡劫期大圆满, so the 100-turn cap is never reached in normal play)
+ * and costs ≈2571 neurons with a 15-exchange replay window. One player can
+ * finish a playthrough in a day, and the remaining 6000 neurons stay available
+ * to the account owner's other Workers.
  *
  * ## Why the replay window is 15 exchanges
  *
  * Every turn re-reads the whole replay window, so the window is the cost knob.
- * Measured per turn: the system prompt is ≈2522 tokens, each reply ≈229 chars
- * (≈174 tokens), each output ≈394 tokens. With a 15-exchange window the steady
- * state is ≈36 neurons/turn, and a 100-turn run totals ≈3657 neurons.
+ * Measured per turn: the system prompt (persona + world bible + runtime
+ * contract) is ≈4930 tokens, the per-turn director block ≈341 tokens, each
+ * reply ≈229 chars (≈174 tokens), each output ≈394 tokens. With a 15-exchange
+ * window the steady state is ≈48 neurons/turn, and a full ≈55-turn run totals
+ * ≈2571 neurons.
  *
  * The token budget is the safety cap: the window never exceeds it, and the
  * system prompt is subtracted first so that an over-long input can never push
