@@ -174,7 +174,7 @@ The only cost control in the project. It is **site-wide**, not per visitor:
 
 | Provider | Daily budget | Why this number |
 | --- | --- | --- |
-| Workers AI | **4,000 neurons** | a full ≈55-turn run costs ≈2,571 neurons with a 15-exchange window, leaving headroom out of a 10,000/day free account allowance |
+| Workers AI | **6,000 neurons** | a full ≈55-turn run costs ≈2,571 neurons with a 15-exchange window — enough for two playthroughs a day out of a 10,000/day free account allowance |
 | OpenAI-compatible | **600,000 tokens** | a full run is ≈435k tokens; the rest is slack for longer replies |
 
 A request is rejected with HTTP 503 and a readable message once the day's budget

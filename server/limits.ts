@@ -17,14 +17,15 @@
  * - any OpenAI-compatible endpoint → **tokens** (input + output, as reported by
  *   the provider, or estimated locally when the provider omits usage).
  *
- * ## Why the Cloudflare budget is 4000 neurons
+ * ## Why the Cloudflare budget is 6000 neurons
  *
  * A free Workers AI account gets 10,000 neurons/day, shared by every Worker on
- * that account. This game takes 4000 of it: a full run is ≈55 turns (the level
+ * that account. This game takes 6000 of it: a full run is ≈55 turns (the level
  * path ends at 渡劫期大圆满, so the 100-turn cap is never reached in normal play)
- * and costs ≈2571 neurons with a 15-exchange replay window. One player can
- * finish a playthrough in a day, and the remaining 6000 neurons stay available
- * to the account owner's other Workers.
+ * and costs ≈2571 neurons with a 15-exchange replay window, so the day's budget
+ * covers a complete playthrough plus room for a second player, a retry after a
+ * dropped reply, and the odd longer turn. The remaining 4000 neurons stay
+ * available to the account owner's other Workers.
  *
  * ## Why the replay window is 15 exchanges
  *
@@ -41,7 +42,7 @@
  */
 
 /** Site-wide daily experience budget for Workers AI, in neurons. */
-export const GAME_NEURON_DAILY_BUDGET = 4000;
+export const GAME_NEURON_DAILY_BUDGET = 6000;
 
 /** Site-wide daily experience budget for OpenAI-compatible providers, in tokens. */
 export const GAME_TOKEN_DAILY_BUDGET = 600_000;

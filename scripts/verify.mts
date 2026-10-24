@@ -333,10 +333,11 @@ section('One gate only: the site-wide daily experience budget');
   check('turn 1 ≈ 36 neurons', Math.round(firstTurn), 36);
   check(`steady turn ≈ 49 neurons (${GAME_HISTORY_MAX_EXCHANGES}-exchange window)`, Math.round(steadyTurn), 48);
 
-  check('neuron budget stays inside the 2000–5000 range', GAME_NEURON_DAILY_BUDGET >= 2000 && GAME_NEURON_DAILY_BUDGET <= 5000, true);
-  check('neuron budget is the documented 4000', GAME_NEURON_DAILY_BUDGET, 4000);
+  check('neuron budget stays inside the 4000–8000 range', GAME_NEURON_DAILY_BUDGET >= 4000 && GAME_NEURON_DAILY_BUDGET <= 8000, true);
+  check('neuron budget is the documented 6000', GAME_NEURON_DAILY_BUDGET, 6000);
+  check('the budget leaves 4000 neurons for other Workers', 10000 - GAME_NEURON_DAILY_BUDGET, 4000);
   check('token budget is the documented 600000', GAME_TOKEN_DAILY_BUDGET, 600_000);
-  check('budget unit mapping', [dailyBudgetFor('neurons'), dailyBudgetFor('tokens')], [4000, 600_000]);
+  check('budget unit mapping', [dailyBudgetFor('neurons'), dailyBudgetFor('tokens')], [6000, 600_000]);
   check('quota key shape (shared namespace, project prefix)', quotaKey('neurons', '2026-01-02'), 'xiuxian:quota:neurons:2026-01-02');
 
   /*
@@ -363,7 +364,8 @@ section('One gate only: the site-wide daily experience budget');
     spent += estimateNeurons(GAME_MODEL, promptTokens + hist, 394);
   }
   check('a full run costs ≈2571 neurons', Math.round(spent), 2571);
-  check('a full run fits in 65% of the daily budget', spent <= GAME_NEURON_DAILY_BUDGET * 0.65, true);
+  check('a full run fits in 43% of the daily budget', spent <= GAME_NEURON_DAILY_BUDGET * 0.43, true);
+  check('two playthroughs fit in one day', spent * 2 <= GAME_NEURON_DAILY_BUDGET, true);
 
   // Token side: a full run must fit the OpenAI-compatible budget too.
   let tokens = 0;
