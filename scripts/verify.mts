@@ -641,7 +641,11 @@ section('Publishable repository: license, bilingual README, screenshots, no pers
   const readmeZh = readTextIfExists('README.zh-CN.md');
   check('README links to the Chinese version', readme.includes('README.zh-CN.md'), true);
   check('Chinese README links back', readmeZh.includes('README.md'), true);
-  check('README shows the live site', readme.includes('xiuxian.wordtk.com'), true);
+  // The live origin is package metadata, not a literal in code: a real domain must
+  // never sit in a script, or every fork would inherit it while building.
+  const homepage = String(JSON.parse(readTextIfExists('package.json') || '{}').homepage ?? '');
+  const liveHost = homepage.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  check('README shows the live site', Boolean(liveHost) && readme.includes(liveHost), true);
   check('logo exists', exists('docs/assets/logo.svg'), true);
 
   const shots = [...readme.matchAll(/docs\/assets\/[A-Za-z0-9_-]+\.(?:webp|png)/g)].map((m) => m[0]);
