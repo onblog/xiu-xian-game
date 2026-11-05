@@ -115,7 +115,16 @@ export const resolveProvider = (env: ProviderEnv): ProviderResolution => {
   return { ok: true, provider: { kind: 'cloudflare', model: model ?? GAME_MODEL } };
 };
 
-/** Text extraction: Workers AI answers with `response`, OpenAI with `choices`. */
+/**
+ * Text extraction: Workers AI answers with `response`, OpenAI with `choices`.
+ *
+ * A reasoning model can answer in the reasoning channel instead of `content`.
+ * Measured on `@cf/qwen/qwen3-30b-a3b-fp8`: with `enable_thinking: false` the
+ * deployment returns `content: null` and the prose in `reasoning` /
+ * `reasoning_content`. A *truncated* generation (`finish_reason: "length"`) is
+ * deliberately not salvaged — that reasoning is a half-finished thought, and the
+ * caller's empty-reply path is the honest outcome.
+ */
 export const extractText = (payload: unknown): string => {
   if (payload === null || payload === undefined) return '';
   if (typeof payload === 'string') return payload;
@@ -124,9 +133,13 @@ export const extractText = (payload: unknown): string => {
 
   const choices = record.choices;
   if (Array.isArray(choices) && choices.length > 0) {
-    const first = choices[0] as { message?: { content?: unknown }; text?: unknown };
+    const first = choices[0] as {
+      message?: { content?: unknown; reasoning?: unknown; reasoning_content?: unknown };
+      text?: unknown;
+      finish_reason?: unknown;
+    };
     const content = first?.message?.content;
-    if (typeof content === 'string') return content;
+    if (typeof content === 'string' && content.trim() !== '') return content;
     // Some gateways return content parts instead of a plain string.
     if (Array.isArray(content)) {
       return content
@@ -138,6 +151,10 @@ export const extractText = (payload: unknown): string => {
         .join('');
     }
     if (typeof first?.text === 'string') return first.text;
+    if (first?.finish_reason !== 'length') {
+      const reasoning = first?.message?.reasoning_content ?? first?.message?.reasoning;
+      if (typeof reasoning === 'string' && reasoning.trim() !== '') return reasoning;
+    }
   }
 
   if (typeof record.result === 'string') return record.result;
@@ -203,7 +220,17 @@ export const chatCompletion = async (env: ProviderEnv, provider: Provider, reque
     payload = await env.AI.run(provider.model as never, {
       messages: request.messages,
       max_tokens: request.maxTokens,
-      temperature: request.temperature
+      temperature: request.temperature,
+      // Narrative prose needs no chain of thought, and a reasoning model spends
+      // the shared `max_tokens` budget on it first: when thinking overruns, the
+      // model has "answered" but `content` comes back empty and the turn fails.
+      // Measured on `@cf/qwen/qwen3-30b-a3b-fp8` with a 900-token budget — the
+      // same reply cost 481 completion tokens / 15.0 neurons / 2.9 s with
+      // thinking and 138 / 4.6 / 1.2 s without. Scoped to Qwen3 because the
+      // template kwarg is model-specific.
+      ...(/^@cf\/qwen\/qwen3/i.test(provider.model)
+        ? { chat_template_kwargs: { enable_thinking: false } }
+        : {})
     } as never);
   }
 
